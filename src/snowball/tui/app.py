@@ -89,7 +89,7 @@ class SnowballApp(App):
     #stats-panel {
         height: auto;
         padding: 1;
-        border: tall #30363d;
+        border: solid #30363d;
         background: #161b22;
         color: #c9d1d9;
     }
@@ -99,7 +99,7 @@ class SnowballApp(App):
         height: 1fr;
         width: 100%;
         background: #0d1117;
-        border: tall #30363d;
+        border: solid #30363d;
     }
 
     DataTable > .datatable--header {
@@ -123,7 +123,7 @@ class SnowballApp(App):
         max-height: 25;
         width: 100%;
         background: #0d1117;
-        border-top: tall #30363d;
+        border-top: solid #30363d;
         padding: 0;
         overflow-y: auto;
     }
