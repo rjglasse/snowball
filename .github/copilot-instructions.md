@@ -2,6 +2,8 @@
 
 This repository contains **Snowball SLR**, a terminal-based Python tool for conducting Systematic Literature Reviews using the snowballing methodology.
 
+> **Important**: For detailed architecture diagrams, design decisions, gotchas, and TUI patterns, see [`/CLAUDE.md`](/CLAUDE.md).
+
 ## Project Overview
 
 - **Purpose**: Automate the discovery and management of academic papers through backward (references) and forward (citations) snowballing
