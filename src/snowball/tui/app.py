@@ -2,32 +2,34 @@
 
 import webbrowser
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
+from textual.containers import Container, Horizontal, ScrollableContainer
 from textual.widgets import (
     Header,
     Footer,
     DataTable,
     Static,
     Button,
-    Input,
     Label,
     TextArea,
     Select,
 )
 from textual.binding import Binding
-from textual.screen import Screen, ModalScreen
-from textual import events
-from rich.text import Text
+from textual.screen import ModalScreen
 
-from ..models import Paper, PaperStatus, ReviewProject, FilterCriteria
+from ..models import Paper, PaperStatus, ReviewProject
 from ..storage.json_storage import JSONStorage
 from ..snowballing import SnowballEngine
-from ..apis.aggregator import APIAggregator
-from ..parsers.pdf_parser import PDFParser
 from ..exporters.bibtex import BibTeXExporter
 from ..exporters.csv_exporter import CSVExporter
+from ..paper_utils import (
+    get_status_value,
+    get_source_value,
+    get_sort_key,
+    format_paper_rich,
+    truncate_title,
+)
 
 
 class ReviewDialog(ModalScreen[Optional[tuple]]):
@@ -39,7 +41,7 @@ class ReviewDialog(ModalScreen[Optional[tuple]]):
 
     def compose(self) -> ComposeResult:
         with Container(id="review-dialog"):
-            yield Label(f"Review: {self.paper.title[:60]}...")
+            yield Label(f"Review: {truncate_title(self.paper.title)}")
             yield Label("\nStatus:")
             yield Select(
                 [
@@ -48,8 +50,8 @@ class ReviewDialog(ModalScreen[Optional[tuple]]):
                     ("Maybe", "maybe"),
                     ("Keep Pending", "pending"),
                 ],
-                value=self.paper.status.value if hasattr(self.paper.status, 'value') else self.paper.status,
-                id="status-select"
+                value=get_status_value(self.paper.status),
+                id="status-select",
             )
             yield Label("\nNotes:")
             yield TextArea(self.paper.notes or "", id="notes-input")
@@ -237,7 +239,7 @@ class SnowballApp(App):
         project_dir: Path,
         storage: JSONStorage,
         engine: SnowballEngine,
-        project: ReviewProject
+        project: ReviewProject,
     ):
         super().__init__()
         self.project_dir = project_dir
@@ -258,9 +260,7 @@ class SnowballApp(App):
 
         # Detail section - starts hidden
         detail_section = ScrollableContainer(
-            Static("", classes="detail-content"),
-            id="detail-section",
-            classes="hidden"
+            Static("", classes="detail-content"), id="detail-section", classes="hidden"
         )
         yield detail_section
 
@@ -284,46 +284,7 @@ class SnowballApp(App):
         Returns a tuple where the first element controls None/missing value ordering,
         and the second element is the actual value for comparison.
         """
-        column = self.sort_column
-
-        if column == "Status":
-            # Sort by status value
-            status_val = paper.status.value if hasattr(paper.status, 'value') else paper.status
-            # Status order: included, excluded, maybe, pending
-            status_order = {"included": 0, "excluded": 1, "maybe": 2, "pending": 3}
-            return (0, status_order.get(status_val, 999))
-
-        elif column == "Title":
-            # Sort alphabetically by title (case-insensitive)
-            return (0, paper.title.lower() if paper.title else "zzz")
-
-        elif column == "Year":
-            # None years go to the end
-            if paper.year is None:
-                return (1, 0)  # (1, ...) puts None at end
-            return (0, paper.year)
-
-        elif column == "Citations":
-            # None citations go to the end
-            if paper.citation_count is None:
-                return (1, 0)
-            return (0, paper.citation_count)
-
-        elif column == "Source":
-            # Sort by source value
-            source_val = paper.source.value if hasattr(paper.source, 'value') else paper.source
-            # Source order: seed, backward, forward
-            source_order = {"seed": 0, "backward": 1, "forward": 2}
-            return (0, source_order.get(source_val, 999))
-
-        elif column == "Iter":
-            # Iteration should never be None
-            return (0, paper.snowball_iteration)
-
-        else:
-            # Fallback: sort by iteration, then status
-            status_val = paper.status.value if hasattr(paper.status, 'value') else paper.status
-            return (0, (paper.snowball_iteration, status_val))
+        return get_sort_key(paper, self.sort_column)
 
     def on_mount(self) -> None:
         """Set up the table when app starts."""
@@ -336,7 +297,7 @@ class SnowballApp(App):
             self._get_column_label("Year"),
             self._get_column_label("Citations"),
             self._get_column_label("Source"),
-            self._get_column_label("Iter")
+            self._get_column_label("Iter"),
         )
 
         # Load and display papers
@@ -356,7 +317,7 @@ class SnowballApp(App):
             self._get_column_label("Year"),
             self._get_column_label("Citations"),
             self._get_column_label("Source"),
-            self._get_column_label("Iter")
+            self._get_column_label("Iter"),
         )
 
         papers = self.storage.load_all_papers()
@@ -366,22 +327,22 @@ class SnowballApp(App):
 
         for paper in papers:
             # Status indicator with icon and text
-            status_val = paper.status.value if hasattr(paper.status, 'value') else paper.status
+            status_val = get_status_value(paper.status)
             status_display = {
                 "included": "[#3fb950]✓ Included[/#3fb950]",
                 "excluded": "[#f85149]✗ Excluded[/#f85149]",
                 "pending": "[#d29922]? Pending[/#d29922]",
-                "maybe": "[#a371f7]~ Maybe[/#a371f7]"
+                "maybe": "[#a371f7]~ Maybe[/#a371f7]",
             }.get(status_val, "?")
 
             # Title (truncate for readability)
-            title = paper.title[:160] + "..." if len(paper.title) > 160 else paper.title
+            title = truncate_title(paper.title, max_length=160)
 
             # Citations
             citations = str(paper.citation_count) if paper.citation_count is not None else "-"
 
             # Source
-            source = paper.source.value if hasattr(paper.source, 'value') else paper.source
+            source = get_source_value(paper.source)
             source_short = source[0].upper()
 
             table.add_row(
@@ -391,7 +352,7 @@ class SnowballApp(App):
                 citations,
                 source_short,
                 str(paper.snowball_iteration),
-                key=paper.id
+                key=paper.id,
             )
 
         # Update stats
@@ -418,64 +379,8 @@ class SnowballApp(App):
         )
 
     def _format_paper_details(self, paper: Paper) -> str:
-        """Format paper details as rich text."""
-        lines = []
-        lines.append(f"[bold #58a6ff]{paper.title}[/bold #58a6ff]\n")
-
-        # Authors
-        if paper.authors:
-            authors_str = ", ".join([a.name for a in paper.authors[:10]])
-            if len(paper.authors) > 10:
-                authors_str += f" (+{len(paper.authors) - 10} more)"
-            lines.append(f"[bold #79c0ff]Authors:[/bold #79c0ff] {authors_str}")
-
-        # Year and venue
-        year_venue = []
-        if paper.year:
-            year_venue.append(str(paper.year))
-        if paper.venue and paper.venue.name:
-            year_venue.append(paper.venue.name)
-        if year_venue:
-            lines.append(f"[bold #79c0ff]Published:[/bold #79c0ff] {' - '.join(year_venue)}")
-
-        # Identifiers
-        ids = []
-        if paper.doi:
-            ids.append(f"DOI: {paper.doi}")
-        if paper.arxiv_id:
-            ids.append(f"arXiv: {paper.arxiv_id}")
-        if ids:
-            lines.append(f"[bold #79c0ff]IDs:[/bold #79c0ff] {', '.join(ids)}")
-
-        # Metrics
-        if paper.citation_count is not None:
-            cit_text = f"Citations: {paper.citation_count}"
-            if paper.influential_citation_count:
-                cit_text += f" (influential: {paper.influential_citation_count})"
-            lines.append(f"[bold #79c0ff]Impact:[/bold #79c0ff] {cit_text}")
-
-        # Review info
-        status_color = {
-            "included": "#3fb950",
-            "excluded": "#f85149",
-            "pending": "#d29922",
-            "maybe": "#a371f7"
-        }.get(paper.status.value if hasattr(paper.status, 'value') else paper.status, "#c9d1d9")
-
-        lines.append(f"[bold #79c0ff]Status:[/bold #79c0ff] [{status_color}]{paper.status.value if hasattr(paper.status, 'value') else paper.status}[/{status_color}]")
-        lines.append(f"[bold #79c0ff]Source:[/bold #79c0ff] {paper.source.value if hasattr(paper.source, 'value') else paper.source} (iteration {paper.snowball_iteration})")
-
-        # Abstract
-        if paper.abstract:
-            lines.append(f"\n[bold #79c0ff]Abstract:[/bold #79c0ff]")
-            lines.append(paper.abstract)
-
-        # Notes
-        if paper.notes:
-            lines.append(f"\n[bold #79c0ff]Notes:[/bold #79c0ff]")
-            lines.append(paper.notes)
-
-        return "\n".join(lines)
+        """Format paper details as rich text using shared function."""
+        return format_paper_rich(paper)
 
     def _show_paper_details(self, paper: Paper) -> None:
         """Show details for a paper in the detail section."""
@@ -562,9 +467,7 @@ class SnowballApp(App):
 
         # Update the paper status
         self.engine.update_paper_review(
-            self.current_paper.id,
-            status,
-            self.current_paper.notes  # Keep existing notes
+            self.current_paper.id, status, self.current_paper.notes  # Keep existing notes
         )
 
         # Refresh the table to show updated status
@@ -606,9 +509,7 @@ class SnowballApp(App):
             if result:
                 _, notes = result
                 self.engine.update_paper_review(
-                    self.current_paper.id,
-                    self.current_paper.status,  # Keep existing status
-                    notes
+                    self.current_paper.id, self.current_paper.status, notes  # Keep existing status
                 )
                 self._refresh_table()
 
@@ -641,7 +542,7 @@ class SnowballApp(App):
     def action_snowball(self) -> None:
         """Run a snowball iteration."""
         # This would be better as a background task, but for simplicity:
-        stats = self.engine.run_snowball_iteration(self.project)
+        self.engine.run_snowball_iteration(self.project)
         self.project = self.storage.load_project()
         self._refresh_table()
 
@@ -656,7 +557,7 @@ class SnowballApp(App):
         bibtex_exporter = BibTeXExporter()
         bibtex_content = bibtex_exporter.export(papers, only_included=True)
         bibtex_path = self.project_dir / "export_included.bib"
-        with open(bibtex_path, 'w') as f:
+        with open(bibtex_path, "w") as f:
             f.write(bibtex_content)
 
         # Export CSV
@@ -674,10 +575,7 @@ class SnowballApp(App):
 
 
 def run_tui(
-    project_dir: Path,
-    storage: JSONStorage,
-    engine: SnowballEngine,
-    project: ReviewProject
+    project_dir: Path, storage: JSONStorage, engine: SnowballEngine, project: ReviewProject
 ) -> None:
     """Run the TUI application."""
     app = SnowballApp(project_dir, storage, engine, project)

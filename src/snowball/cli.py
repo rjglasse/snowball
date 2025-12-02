@@ -15,6 +15,14 @@ from .snowballing import SnowballEngine
 from .tui.app import run_tui
 from .exporters.bibtex import BibTeXExporter
 from .exporters.csv_exporter import CSVExporter
+from .paper_utils import (
+    get_status_value,
+    filter_papers,
+    sort_papers,
+    paper_to_dict,
+    format_paper_text,
+    truncate_title,
+)
 
 
 # Setup logging
@@ -250,56 +258,25 @@ def list_papers(args) -> None:
 
     papers = storage.load_all_papers()
 
-    # Filter by status if specified
-    if args.status:
-        papers = [p for p in papers if _get_status_value(p.status) == args.status]
+    # Filter papers using shared function
+    papers = filter_papers(papers, status=args.status, iteration=args.iteration, source=args.source)
 
-    # Filter by iteration if specified
-    if args.iteration is not None:
-        papers = [p for p in papers if p.snowball_iteration == args.iteration]
-
-    # Filter by source if specified
-    if args.source:
-        papers = [p for p in papers if _get_source_value(p.source) == args.source]
-
-    # Sort papers
-    if args.sort == "citations":
-        papers.sort(key=lambda p: (p.citation_count is None, -(p.citation_count or 0)))
-    elif args.sort == "year":
-        papers.sort(key=lambda p: (p.year is None, -(p.year or 0)))
-    elif args.sort == "title":
-        papers.sort(key=lambda p: p.title.lower())
-    elif args.sort == "status":
-        status_order = {"pending": 0, "included": 1, "excluded": 2, "maybe": 3}
-        papers.sort(key=lambda p: status_order.get(_get_status_value(p.status), 999))
+    # Sort papers using shared function
+    papers = sort_papers(papers, sort_by=args.sort, ascending=False)
 
     # Output format
     if args.format == "json":
-        output = []
-        for paper in papers:
-            output.append(
-                {
-                    "id": paper.id,
-                    "title": paper.title,
-                    "year": paper.year,
-                    "status": _get_status_value(paper.status),
-                    "source": _get_source_value(paper.source),
-                    "iteration": paper.snowball_iteration,
-                    "citations": paper.citation_count,
-                    "doi": paper.doi,
-                    "arxiv_id": paper.arxiv_id,
-                }
-            )
+        output = [paper_to_dict(paper) for paper in papers]
         print(json.dumps(output, indent=2))
     else:
         # Table format
         print(f"\n{'ID':<38} {'Status':<10} {'Year':<6} {'Citations':<10} {'Title'}")
         print("-" * 120)
         for paper in papers:
-            status = _get_status_value(paper.status)
+            status = get_status_value(paper.status)
             year = str(paper.year) if paper.year else "-"
             citations = str(paper.citation_count) if paper.citation_count is not None else "-"
-            title = paper.title[:60] + "..." if len(paper.title) > 60 else paper.title
+            title = truncate_title(paper.title)
             print(f"{paper.id:<38} {status:<10} {year:<6} {citations:<10} {title}")
 
         print(f"\nTotal: {len(papers)} paper(s)")
@@ -352,68 +329,11 @@ def show_paper(args) -> None:
 
     # Output format
     if args.format == "json":
-        output = {
-            "id": paper.id,
-            "title": paper.title,
-            "authors": [a.name for a in paper.authors] if paper.authors else [],
-            "year": paper.year,
-            "abstract": paper.abstract,
-            "doi": paper.doi,
-            "arxiv_id": paper.arxiv_id,
-            "status": _get_status_value(paper.status),
-            "source": _get_source_value(paper.source),
-            "iteration": paper.snowball_iteration,
-            "citations": paper.citation_count,
-            "influential_citations": paper.influential_citation_count,
-            "venue": paper.venue.name if paper.venue else None,
-            "notes": paper.notes,
-            "tags": paper.tags,
-        }
+        output = paper_to_dict(paper, include_abstract=True)
         print(json.dumps(output, indent=2))
     else:
-        # Human-readable format
-        print(f"\n{'=' * 80}")
-        print(f"Title: {paper.title}")
-        print(f"{'=' * 80}")
-        print(f"ID:       {paper.id}")
-        print(f"Status:   {_get_status_value(paper.status)}")
-        print(f"Source:   {_get_source_value(paper.source)} (iteration {paper.snowball_iteration})")
-        print()
-
-        if paper.authors:
-            authors = ", ".join([a.name for a in paper.authors[:10]])
-            if len(paper.authors) > 10:
-                authors += f" (+{len(paper.authors) - 10} more)"
-            print(f"Authors:  {authors}")
-
-        if paper.year:
-            print(f"Year:     {paper.year}")
-
-        if paper.venue and paper.venue.name:
-            print(f"Venue:    {paper.venue.name}")
-
-        if paper.doi:
-            print(f"DOI:      {paper.doi}")
-
-        if paper.arxiv_id:
-            print(f"arXiv:    {paper.arxiv_id}")
-
-        if paper.citation_count is not None:
-            cit_text = str(paper.citation_count)
-            if paper.influential_citation_count:
-                cit_text += f" (influential: {paper.influential_citation_count})"
-            print(f"Citations: {cit_text}")
-
-        if paper.abstract:
-            print(f"\nAbstract:\n{paper.abstract}")
-
-        if paper.notes:
-            print(f"\nNotes:\n{paper.notes}")
-
-        if paper.tags:
-            print(f"\nTags: {', '.join(paper.tags)}")
-
-        print()
+        # Human-readable format using shared function
+        print(format_paper_text(paper))
 
 
 def set_status(args) -> None:
@@ -460,7 +380,7 @@ def set_status(args) -> None:
         sys.exit(1)
 
     # Update paper
-    old_status = _get_status_value(paper.status)
+    old_status = get_status_value(paper.status)
     paper.status = new_status
     if args.notes:
         paper.notes = args.notes
@@ -527,16 +447,6 @@ def show_stats(args) -> None:
         for source, count in stats["by_source"].items():
             print(f"  {source}: {count}")
         print()
-
-
-def _get_status_value(status) -> str:
-    """Get string value from status (handles both enum and string)."""
-    return status.value if hasattr(status, "value") else status
-
-
-def _get_source_value(source) -> str:
-    """Get string value from source (handles both enum and string)."""
-    return source.value if hasattr(source, "value") else source
 
 
 def main():
