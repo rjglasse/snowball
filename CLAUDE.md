@@ -202,6 +202,45 @@ src/snowball/
 
 ## Testing Notes
 
+**Automated Testing with pytest**:
+
+Run the full test suite:
+```bash
+# Run all tests
+pytest
+
+# Run with verbose output
+pytest -v
+
+# Run specific test file
+pytest tests/test_models.py
+
+# Run specific test class or method
+pytest tests/test_models.py::TestPaper::test_create_paper_minimal
+```
+
+**Test Structure**:
+```
+tests/
+├── conftest.py           # Shared fixtures (sample papers, storage, etc.)
+├── test_models.py        # Pydantic model tests
+├── test_snowballing.py   # Snowball engine tests
+├── test_cli.py           # CLI command tests
+├── apis/                 # API client tests (with mocking)
+├── exporters/            # Export functionality tests
+├── filters/              # Filter engine tests
+├── parsers/              # PDF parser tests
+└── storage/              # JSON storage tests
+```
+
+**Key Fixtures** (defined in `conftest.py`):
+- `sample_paper`: A Paper with all fields populated
+- `sample_papers`: List of 4 papers with different statuses
+- `sample_project`: A ReviewProject instance
+- `temp_project_dir`: Temporary directory for testing storage
+- `storage`: JSONStorage instance with temp directory
+- `storage_with_papers`: Storage pre-loaded with sample papers
+
 **Manual Testing Workflow**:
 1. `snowball init test-project --min-year 2020`
 2. `snowball add-seed test-project --doi "10.1234/example"`

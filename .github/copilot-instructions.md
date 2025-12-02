@@ -49,6 +49,50 @@ src/snowball/
 - Use fixtures for common test data
 - Mock external API calls in unit tests
 
+### Running Tests
+
+```bash
+# Run all tests
+pytest
+
+# Run tests with verbose output
+pytest -v
+
+# Run specific test file
+pytest tests/test_models.py
+
+# Run specific test class
+pytest tests/test_models.py::TestPaper
+
+# Run tests with coverage
+pytest --cov=snowball
+```
+
+### Test Structure
+
+The test suite is organized as follows:
+```
+tests/
+├── __init__.py
+├── conftest.py           # Shared fixtures
+├── test_models.py        # Tests for data models
+├── test_snowballing.py   # Tests for snowball engine
+├── test_cli.py           # Tests for CLI commands
+├── apis/
+│   ├── test_base.py          # Tests for base API client
+│   ├── test_aggregator.py    # Tests for API aggregator
+│   └── test_semantic_scholar.py
+├── exporters/
+│   ├── test_bibtex.py        # Tests for BibTeX export
+│   └── test_csv_exporter.py  # Tests for CSV export
+├── filters/
+│   └── test_filter_engine.py # Tests for paper filtering
+├── parsers/
+│   └── test_pdf_parser.py    # Tests for PDF parsing
+└── storage/
+    └── test_json_storage.py  # Tests for JSON storage
+```
+
 ## Common Tasks
 
 ### Adding a New API Integration
