@@ -25,7 +25,7 @@ A terminal-based tool for conducting Systematic Literature Reviews (SLR) using t
 
 ```bash
 # Install uv (if not already installed)
-pip install uv
+pipx install uv
 
 # Clone the repository
 git clone <repo-url>
@@ -51,25 +51,26 @@ The `uv sync` command will:
 
 You can then run commands with `uv run <command>`, which automatically uses the virtual environment.
 
-### Using pip (Alternative)
+### Using pipx (Alternative)
 
 ```bash
-# Clone the repository
+# Install pipx (if not already installed)
+python -m pip install --user pipx
+python -m pipx ensurepath
+
+# Install the package from the repository
+pipx install git+https://github.com/rjglasse/snowball.git
+
+# Or install from a local clone
 git clone <repo-url>
 cd snowball
+pipx install .
 
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Optional: Install with GROBID support
+pipx install "git+https://github.com/rjglasse/snowball.git[grobid]"
+# Or from local: pipx install ".[grobid]"
 
-# Install the package
-pip install -e .
-
-# Optional: Install GROBID support
-pip install -e ".[grobid]"
-
-# Optional: Install development dependencies
-pip install -e ".[dev]"
+# Note: For development work with editable installs, use uv instead
 ```
 
 ## Quick Start
@@ -399,7 +400,7 @@ For development, we use `uv` for fast dependency management:
 
 ```bash
 # Install uv
-pip install uv
+pipx install uv
 
 # Clone and set up the project
 git clone <repo-url>
