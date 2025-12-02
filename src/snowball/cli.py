@@ -336,10 +336,15 @@ def show_paper(args) -> None:
             # Try partial match
             papers = storage.load_all_papers()
             title_lower = args.title.lower()
-            for p in papers:
-                if title_lower in p.title.lower():
-                    paper = p
-                    break
+            matches = [p for p in papers if title_lower in p.title.lower()]
+            if len(matches) == 1:
+                paper = matches[0]
+            elif len(matches) > 1:
+                logger.error(f"Multiple papers match '{args.title}':")
+                for p in matches:
+                    logger.error(f"  ID: {p.id} - {p.title}")
+                logger.error("Please use --id to specify the exact paper.")
+                sys.exit(1)
 
     if not paper:
         logger.error("Paper not found")
