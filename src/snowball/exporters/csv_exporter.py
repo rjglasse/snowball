@@ -121,8 +121,8 @@ class CSVExporter:
 
         # Count by source
         stats["Papers - Seed"] = len([p for p in papers if p.snowball_iteration == 0])
-        stats["Papers - Backward"] = len([p for p in papers if p.source.value == "backward"])
-        stats["Papers - Forward"] = len([p for p in papers if p.source.value == "forward"])
+        stats["Papers - Backward"] = len([p for p in papers if (p.source.value if hasattr(p.source, 'value') else p.source) == "backward"])
+        stats["Papers - Forward"] = len([p for p in papers if (p.source.value if hasattr(p.source, 'value') else p.source) == "forward"])
 
         # Year range
         years = [p.year for p in papers if p.year is not None]
