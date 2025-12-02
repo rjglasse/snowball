@@ -110,6 +110,36 @@ The TUI features a clean, GitHub-inspired dark theme with a sortable table inter
 - Expandable paper details with abstract, authors, and metadata
 - Real-time statistics panel showing included/excluded/pending counts
 
+### 4b. Non-Interactive Review (for AI Agents/Scripts)
+
+Snowball also provides non-interactive CLI commands for automation and AI agents:
+
+```bash
+# List papers with filtering options
+snowball list my-slr-project --status pending --format json
+snowball list my-slr-project --iteration 1 --sort citations
+
+# View paper details
+snowball show my-slr-project --id paper-uuid
+snowball show my-slr-project --doi "10.1234/example" --format json
+snowball show my-slr-project --title "machine learning"
+
+# Set paper status
+snowball set-status my-slr-project --id paper-uuid --status included --notes "Relevant"
+snowball set-status my-slr-project --doi "10.1234/example" --status excluded
+
+# View project statistics
+snowball stats my-slr-project --format json
+```
+
+**Available Commands:**
+- `list` - List papers with filters (status, iteration, source) and sorting
+- `show` - View detailed paper information by ID, DOI, or title
+- `set-status` - Update paper status (pending, included, excluded, maybe)
+- `stats` - View project statistics
+
+All commands support `--format json` for machine-readable output.
+
 ### 5. Export Results
 
 ```bash
