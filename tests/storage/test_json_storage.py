@@ -1,11 +1,9 @@
 """Tests for JSON storage functionality."""
 
-import pytest
 import json
-from pathlib import Path
 
 from snowball.storage.json_storage import JSONStorage
-from snowball.models import Paper, PaperStatus, PaperSource, ReviewProject, FilterCriteria
+from snowball.models import PaperStatus
 
 
 class TestJSONStorage:

@@ -1,7 +1,7 @@
 """Tests for Semantic Scholar API client."""
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from snowball.apis.semantic_scholar import SemanticScholarClient
 from snowball.apis.base import RateLimitError, APINotFoundError

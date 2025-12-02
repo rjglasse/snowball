@@ -3,7 +3,6 @@
 import pytest
 
 from snowball.apis.base import BaseAPIClient, APIClientError, RateLimitError, APINotFoundError
-from snowball.models import Paper
 
 
 class TestAPIClientErrors:

@@ -1,12 +1,12 @@
 """Tests for CLI functionality."""
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import sys
 import tempfile
 from pathlib import Path
 
-from snowball.cli import main, init_project, add_seed, run_snowball, review, export_results
+from snowball.cli import main, init_project, add_seed, run_snowball, export_results
 
 
 class TestCLIHelpers:

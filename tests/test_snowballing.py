@@ -1,7 +1,7 @@
 """Tests for core snowballing functionality."""
 
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock
 from pathlib import Path
 import tempfile
 

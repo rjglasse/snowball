@@ -3,7 +3,7 @@
 import pytest
 
 from snowball.filters.filter_engine import FilterEngine
-from snowball.models import Paper, PaperSource, PaperStatus, FilterCriteria, Venue, Author
+from snowball.models import Paper, PaperSource, FilterCriteria, Venue
 
 
 class TestFilterEngine:

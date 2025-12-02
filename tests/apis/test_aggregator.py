@@ -1,10 +1,10 @@
 """Tests for API aggregator."""
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from snowball.apis.aggregator import APIAggregator
-from snowball.models import Paper, PaperSource, Author
+from snowball.models import Paper, PaperSource
 
 
 class TestAPIAggregator:
@@ -71,7 +71,7 @@ class TestAPIAggregator:
         mock_arxiv.return_value = Mock()
         
         aggregator = APIAggregator()
-        result = aggregator.search_by_doi("10.1234/test")
+        aggregator.search_by_doi("10.1234/test")
         
         # Should have tried S2 first, then OpenAlex
         mock_s2_instance.search_by_doi.assert_called_once()

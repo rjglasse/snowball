@@ -1,6 +1,5 @@
 """Tests for Pydantic data models."""
 
-import pytest
 from datetime import datetime
 
 from snowball.models import (

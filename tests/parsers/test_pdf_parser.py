@@ -1,8 +1,6 @@
 """Tests for PDF parsing functionality."""
 
 import pytest
-from pathlib import Path
-import tempfile
 
 from snowball.parsers.pdf_parser import PDFParser, PDFParseResult
 
@@ -142,9 +140,8 @@ class TestPDFParserHeuristics:
         The field of machine learning...
         """
         
-        abstract = parser._extract_abstract_heuristic(text)
-        # May or may not find abstract depending on format
-        # Just ensure it doesn't crash
+        # May or may not find abstract depending on format - just ensure it doesn't crash
+        parser._extract_abstract_heuristic(text)
 
     def test_extract_references_heuristic(self, parser):
         """Test reference extraction from text."""
@@ -169,10 +166,8 @@ class TestPDFParserHeuristics:
         """
         
         references = parser._extract_references_heuristic(text)
-        if references:
-            # Check if any reference has a DOI
-            dois_found = [ref.get('doi') for ref in references if ref.get('doi')]
-            # Note: depends on regex matching
+        # Just ensure it returns a list without crashing
+        assert isinstance(references, list)
 
     def test_extract_references_heuristic_no_section(self, parser):
         """Test reference extraction when no reference section."""
