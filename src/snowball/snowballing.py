@@ -53,6 +53,7 @@ class SnowballEngine:
             return None
 
         # Create initial paper from parsed data
+        # Store GROBID-extracted references in raw_data for use in backward snowballing
         paper = Paper(
             id=JSONStorage.generate_id(),
             title=parse_result.title,
@@ -62,8 +63,11 @@ class SnowballEngine:
             doi=parse_result.doi,
             source=PaperSource.SEED,
             snowball_iteration=0,
-            pdf_path=str(pdf_path)
+            pdf_path=str(pdf_path),
+            raw_data={"grobid_references": parse_result.references}
         )
+
+        logger.info(f"Extracted {len(parse_result.references)} references from PDF")
 
         # Try to identify and enrich the paper using APIs
         logger.info("Enriching paper metadata from APIs...")
@@ -172,7 +176,7 @@ class SnowballEngine:
             # Backward snowballing (references)
             if direction in ("backward", "both"):
                 try:
-                    references = self.api.get_references(source_paper)
+                    references = self._get_references_for_paper(source_paper)
                     for ref_paper in references:
                         if self._is_new_paper(ref_paper, seen_identifiers):
                             ref_paper.source = PaperSource.BACKWARD
@@ -231,6 +235,59 @@ class SnowballEngine:
             "auto_excluded": auto_excluded,
             "for_review": len(filtered_papers)
         }
+
+    def _get_references_for_paper(self, paper: Paper) -> List[Paper]:
+        """Get references for a paper, preferring GROBID-extracted data over API.
+
+        For papers parsed from PDF, we have the references already extracted by GROBID.
+        We create Paper objects directly from this data - no API lookup needed.
+        Falls back to API if no GROBID references are stored.
+
+        Args:
+            paper: Source paper to get references for
+
+        Returns:
+            List of Paper objects for each reference
+        """
+        # Check if we have GROBID-extracted references
+        grobid_refs = paper.raw_data.get("grobid_references", []) if paper.raw_data else []
+
+        if grobid_refs:
+            logger.info(f"Using {len(grobid_refs)} GROBID-extracted references (no API needed)")
+            references = []
+
+            for ref in grobid_refs:
+                if isinstance(ref, dict):
+                    # Extract title from raw text (text after year, before first period)
+                    title = ref.get("raw", "Unknown reference")[:200]
+                    if ref.get("year") and ref.get("raw"):
+                        raw = ref["raw"]
+                        year_str = str(ref["year"])
+                        if year_str in raw:
+                            parts = raw.split(year_str, 1)
+                            if len(parts) > 1:
+                                title_part = parts[1].strip(". ")
+                                if ". " in title_part:
+                                    title_part = title_part.split(". ")[0]
+                                if len(title_part) > 10:
+                                    title = title_part
+
+                    ref_paper = Paper(
+                        id=JSONStorage.generate_id(),
+                        title=title,
+                        doi=ref.get("doi"),
+                        year=ref.get("year"),
+                        source=PaperSource.BACKWARD,
+                        raw_data={"grobid_raw": ref.get("raw")}
+                    )
+                    references.append(ref_paper)
+
+            logger.info(f"Created {len(references)} reference papers from GROBID data")
+            return references
+
+        # Fall back to API if no GROBID references
+        logger.info("No GROBID references, falling back to API")
+        return self.api.get_references(paper)
 
     def _is_new_paper(self, paper: Paper, seen_identifiers: Set[str]) -> bool:
         """Check if a paper is new (not already seen)."""
