@@ -115,11 +115,14 @@ class SnowballEngine:
         logger.info(f"Added seed paper: {paper.title}")
         return paper
 
-    def run_snowball_iteration(self, project: ReviewProject) -> dict:
+    def run_snowball_iteration(
+        self, project: ReviewProject, direction: str = "both"
+    ) -> dict:
         """Run one iteration of snowballing.
 
         Args:
             project: Current review project
+            direction: Snowballing direction - "backward", "forward", or "both"
 
         Returns:
             Statistics about the iteration
@@ -127,7 +130,7 @@ class SnowballEngine:
         current_iter = project.current_iteration
         next_iter = current_iter + 1
 
-        logger.info(f"Starting snowball iteration {next_iter}")
+        logger.info(f"Starting snowball iteration {next_iter} (direction: {direction})")
 
         # Get papers from current iteration that are included
         if current_iter == 0:
@@ -167,32 +170,34 @@ class SnowballEngine:
             logger.info(f"Processing: {source_paper.title}")
 
             # Backward snowballing (references)
-            try:
-                references = self.api.get_references(source_paper)
-                for ref_paper in references:
-                    if self._is_new_paper(ref_paper, seen_identifiers):
-                        ref_paper.source = PaperSource.BACKWARD
-                        ref_paper.source_paper_id = source_paper.id
-                        ref_paper.snowball_iteration = next_iter
-                        discovered_papers.append(ref_paper)
-                        self._mark_seen(ref_paper, seen_identifiers)
-                        backward_count += 1
-            except Exception as e:
-                logger.error(f"Error getting references: {e}")
+            if direction in ("backward", "both"):
+                try:
+                    references = self.api.get_references(source_paper)
+                    for ref_paper in references:
+                        if self._is_new_paper(ref_paper, seen_identifiers):
+                            ref_paper.source = PaperSource.BACKWARD
+                            ref_paper.source_paper_id = source_paper.id
+                            ref_paper.snowball_iteration = next_iter
+                            discovered_papers.append(ref_paper)
+                            self._mark_seen(ref_paper, seen_identifiers)
+                            backward_count += 1
+                except Exception as e:
+                    logger.error(f"Error getting references: {e}")
 
             # Forward snowballing (citations)
-            try:
-                citations = self.api.get_citations(source_paper)
-                for cit_paper in citations:
-                    if self._is_new_paper(cit_paper, seen_identifiers):
-                        cit_paper.source = PaperSource.FORWARD
-                        cit_paper.source_paper_id = source_paper.id
-                        cit_paper.snowball_iteration = next_iter
-                        discovered_papers.append(cit_paper)
-                        self._mark_seen(cit_paper, seen_identifiers)
-                        forward_count += 1
-            except Exception as e:
-                logger.error(f"Error getting citations: {e}")
+            if direction in ("forward", "both"):
+                try:
+                    citations = self.api.get_citations(source_paper)
+                    for cit_paper in citations:
+                        if self._is_new_paper(cit_paper, seen_identifiers):
+                            cit_paper.source = PaperSource.FORWARD
+                            cit_paper.source_paper_id = source_paper.id
+                            cit_paper.snowball_iteration = next_iter
+                            discovered_papers.append(cit_paper)
+                            self._mark_seen(cit_paper, seen_identifiers)
+                            forward_count += 1
+                except Exception as e:
+                    logger.error(f"Error getting citations: {e}")
 
         logger.info(f"Discovered {len(discovered_papers)} new papers")
         logger.info(f"  Backward: {backward_count}, Forward: {forward_count}")

@@ -134,7 +134,7 @@ def run_snowball(args) -> None:
     while engine.should_continue_snowballing(project):
         logger.info(f"\nRunning snowball iteration {project.current_iteration + 1}...")
 
-        stats = engine.run_snowball_iteration(project)
+        stats = engine.run_snowball_iteration(project, direction=args.direction)
 
         logger.info(f"Iteration {project.current_iteration} complete:")
         logger.info(f"  - Discovered: {stats['added']} papers")
@@ -483,6 +483,12 @@ def main():
     snowball_parser = subparsers.add_parser("snowball", help="Run snowballing iterations")
     snowball_parser.add_argument("directory", help="Project directory")
     snowball_parser.add_argument("--iterations", type=int, help="Number of iterations to run")
+    snowball_parser.add_argument(
+        "--direction",
+        choices=["backward", "forward", "both"],
+        default="both",
+        help="Snowballing direction: backward (references), forward (citations), or both (default)",
+    )
     snowball_parser.add_argument("--s2-api-key", help="Semantic Scholar API key")
     snowball_parser.add_argument("--email", help="Email for API polite pools")
 

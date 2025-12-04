@@ -113,9 +113,22 @@ snowball snowball my-slr-project \
   --email your.email@domain.com
 ```
 
+You can also specify which direction to snowball:
+
+```bash
+# Only backward snowballing (papers referenced by your seeds)
+snowball snowball my-slr-project --direction backward
+
+# Only forward snowballing (papers citing your seeds)
+snowball snowball my-slr-project --direction forward
+
+# Both directions (default)
+snowball snowball my-slr-project --direction both
+```
+
 This will:
-- Find all papers referenced by your seeds (backward)
-- Find all papers citing your seeds (forward)
+- Find all papers referenced by your seeds (backward) - if direction is "backward" or "both"
+- Find all papers citing your seeds (forward) - if direction is "forward" or "both"
 - Apply your configured filters
 - Save all discovered papers for review
 
