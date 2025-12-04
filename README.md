@@ -263,11 +263,34 @@ While most APIs work without keys, you'll get higher rate limits with authentica
 
 **Semantic Scholar API Key:**
 1. Register at https://www.semanticscholar.org/product/api
-2. Use with `--s2-api-key` flag
+2. Set via environment variable (recommended) or CLI flag
 
 **Email for Polite Pools:**
 - CrossRef and OpenAlex offer faster service if you provide an email
-- Use with `--email` flag
+- Set via environment variable (recommended) or CLI flag
+
+**Environment Variables (Recommended):**
+
+Add these to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
+
+```bash
+export SEMANTIC_SCHOLAR_API_KEY="your-api-key-here"
+export SNOWBALL_EMAIL="your.email@domain.com"
+```
+
+Then commands will automatically use these credentials:
+```bash
+snowball snowball my-project  # Uses env vars automatically
+```
+
+**CLI Flags (Alternative):**
+
+You can also pass credentials per-command:
+```bash
+snowball snowball my-project --s2-api-key YOUR_KEY --email your@email.com
+```
+
+CLI flags override environment variables when both are set.
 
 ### GROBID (Optional)
 
