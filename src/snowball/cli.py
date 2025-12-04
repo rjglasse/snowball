@@ -1,5 +1,6 @@
 """Command-line interface for Snowball SLR tool."""
 
+import os
 import sys
 import logging
 import json
@@ -30,6 +31,21 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def get_api_config(args) -> tuple:
+    """Get API configuration from args or environment variables.
+
+    Environment variables:
+        SEMANTIC_SCHOLAR_API_KEY: Semantic Scholar API key
+        SNOWBALL_EMAIL: Email for API polite pools
+
+    Returns:
+        Tuple of (s2_api_key, email)
+    """
+    s2_api_key = getattr(args, 's2_api_key', None) or os.environ.get('SEMANTIC_SCHOLAR_API_KEY')
+    email = getattr(args, 'email', None) or os.environ.get('SNOWBALL_EMAIL')
+    return s2_api_key, email
 
 
 def init_project(args) -> None:
@@ -80,7 +96,8 @@ def add_seed(args) -> None:
         sys.exit(1)
 
     # Set up API and engine
-    api = APIAggregator(s2_api_key=args.s2_api_key, email=args.email)
+    s2_api_key, email = get_api_config(args)
+    api = APIAggregator(s2_api_key=s2_api_key, email=email)
     pdf_parser = PDFParser(use_grobid=not args.no_grobid)
     engine = SnowballEngine(storage, api, pdf_parser)
 
@@ -126,7 +143,8 @@ def run_snowball(args) -> None:
         sys.exit(1)
 
     # Set up API and engine
-    api = APIAggregator(s2_api_key=args.s2_api_key, email=args.email)
+    s2_api_key, email = get_api_config(args)
+    api = APIAggregator(s2_api_key=s2_api_key, email=email)
     engine = SnowballEngine(storage, api)
 
     # Run iterations
@@ -176,7 +194,8 @@ def review(args) -> None:
         sys.exit(1)
 
     # Set up API and engine
-    api = APIAggregator(s2_api_key=args.s2_api_key, email=args.email)
+    s2_api_key, email = get_api_config(args)
+    api = APIAggregator(s2_api_key=s2_api_key, email=email)
     engine = SnowballEngine(storage, api)
 
     # Launch TUI

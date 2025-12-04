@@ -35,19 +35,27 @@ class SemanticScholarClient(BaseAPIClient):
         "journal",
     ]
 
-    def __init__(self, api_key: Optional[str] = None, rate_limit_delay: float = 0.1):
+    def __init__(self, api_key: Optional[str] = None, rate_limit_delay: Optional[float] = None):
         """Initialize Semantic Scholar client.
 
         Args:
             api_key: Optional API key for higher rate limits
-            rate_limit_delay: Delay between requests in seconds
+            rate_limit_delay: Delay between requests in seconds.
+                              Defaults to 1.0s without API key, 0.05s with API key.
         """
         self.api_key = api_key
-        self.rate_limit_delay = rate_limit_delay
+        # S2 rate limits: 1 req/sec without key, ~100 req/sec with key
+        if rate_limit_delay is not None:
+            self.rate_limit_delay = rate_limit_delay
+        elif api_key:
+            self.rate_limit_delay = 0.05  # 20 req/sec with key (conservative)
+        else:
+            self.rate_limit_delay = 1.0   # 1 req/sec without key
         self.client = httpx.Client(timeout=30.0)
 
         if api_key:
             self.client.headers["x-api-key"] = api_key
+            logger.info("Semantic Scholar client initialized with API key (faster rate limit)")
 
     def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
         """Make a request to the Semantic Scholar API.
