@@ -155,6 +155,12 @@ class SnowballEngine:
 
         logger.info(f"Processing {len(source_papers)} source papers")
 
+        # Mark source papers as included (they're being used for snowballing)
+        for paper in source_papers:
+            if paper.status != PaperStatus.INCLUDED:
+                paper.status = PaperStatus.INCLUDED
+                self.storage.save_paper(paper)
+
         # Track discovered papers (using DOI/title to avoid duplicates)
         discovered_papers = []
         seen_identifiers: Set[str] = set()
