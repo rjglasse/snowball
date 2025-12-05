@@ -138,11 +138,12 @@ class SnowballEngine:
 
         # Get papers from current iteration that are included
         if current_iter == 0:
-            # First iteration: use seed papers
-            source_papers = [
+            # First iteration: use seed papers (skip excluded ones)
+            all_seeds = [
                 self.storage.load_paper(paper_id)
                 for paper_id in project.seed_paper_ids
             ]
+            source_papers = [p for p in all_seeds if p.status != PaperStatus.EXCLUDED]
         else:
             # Get papers from previous iteration that were included
             all_papers = self.storage.get_papers_by_iteration(current_iter)
