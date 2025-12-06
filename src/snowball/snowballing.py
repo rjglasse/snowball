@@ -387,3 +387,65 @@ class SnowballEngine:
                 if p.status == PaperStatus.INCLUDED
             ]
             return len(included_papers) > 0
+
+    def update_citations_from_google_scholar(
+        self,
+        papers: Optional[List[Paper]] = None,
+        rate_limit_delay: float = 5.0
+    ) -> dict:
+        """Update citation counts for papers using Google Scholar.
+
+        Args:
+            papers: List of papers to update. If None, updates all papers.
+            rate_limit_delay: Delay between Google Scholar requests (default 5s)
+
+        Returns:
+            Statistics about the update: {updated, failed, skipped}
+        """
+        from .apis.google_scholar import GoogleScholarClient
+
+        gs_client = GoogleScholarClient(rate_limit_delay=rate_limit_delay)
+
+        if papers is None:
+            papers = self.storage.load_all_papers()
+
+        stats = {"updated": 0, "failed": 0, "skipped": 0, "total": len(papers)}
+
+        logger.info(f"Updating citations for {len(papers)} papers from Google Scholar...")
+
+        for i, paper in enumerate(papers):
+            if not paper.title or paper.title == "Unknown reference":
+                stats["skipped"] += 1
+                continue
+
+            logger.info(f"[{i+1}/{len(papers)}] {paper.title[:50]}...")
+
+            try:
+                citation_count = gs_client.get_citation_count(paper.title)
+
+                if citation_count is not None:
+                    old_count = paper.citation_count
+                    paper.citation_count = citation_count
+
+                    # Store Google Scholar data in raw_data
+                    if paper.raw_data is None:
+                        paper.raw_data = {}
+                    paper.raw_data["google_scholar_citations"] = citation_count
+
+                    self.storage.save_paper(paper)
+                    stats["updated"] += 1
+
+                    if old_count != citation_count:
+                        logger.info(f"  Updated: {old_count} -> {citation_count}")
+                else:
+                    stats["failed"] += 1
+                    logger.debug(f"  Not found on Google Scholar")
+
+            except Exception as e:
+                stats["failed"] += 1
+                logger.warning(f"  Error: {e}")
+
+        logger.info(f"Citation update complete: {stats['updated']} updated, "
+                   f"{stats['failed']} failed, {stats['skipped']} skipped")
+
+        return stats

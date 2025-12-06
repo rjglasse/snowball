@@ -465,6 +465,52 @@ def show_stats(args) -> None:
         print()
 
 
+def update_citations(args) -> None:
+    """Update citation counts from Google Scholar."""
+    project_dir = Path(args.directory)
+
+    if not project_dir.exists():
+        logger.error(f"Project directory {project_dir} does not exist")
+        sys.exit(1)
+
+    # Load project
+    storage = JSONStorage(project_dir)
+    project = storage.load_project()
+
+    if not project:
+        logger.error("No project found. Run 'snowball init' first.")
+        sys.exit(1)
+
+    # Set up engine (no API needed for citation update)
+    from .apis.aggregator import APIAggregator
+    api = APIAggregator()
+    engine = SnowballEngine(storage, api)
+
+    # Get papers to update
+    papers = None
+    if args.status:
+        status_map = {
+            "pending": PaperStatus.PENDING,
+            "included": PaperStatus.INCLUDED,
+            "excluded": PaperStatus.EXCLUDED,
+            "maybe": PaperStatus.MAYBE,
+        }
+        papers = storage.get_papers_by_status(status_map[args.status])
+        logger.info(f"Updating {len(papers)} papers with status '{args.status}'")
+
+    # Run update
+    stats = engine.update_citations_from_google_scholar(
+        papers=papers,
+        rate_limit_delay=args.delay
+    )
+
+    logger.info(f"\nUpdate complete:")
+    logger.info(f"  Total papers: {stats['total']}")
+    logger.info(f"  Updated: {stats['updated']}")
+    logger.info(f"  Failed: {stats['failed']}")
+    logger.info(f"  Skipped: {stats['skipped']}")
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -583,6 +629,23 @@ def main():
         "--format", choices=["text", "json"], default="text", help="Output format (default: text)"
     )
 
+    # Update citations command
+    update_citations_parser = subparsers.add_parser(
+        "update-citations", help="Update citation counts from Google Scholar"
+    )
+    update_citations_parser.add_argument("directory", help="Project directory")
+    update_citations_parser.add_argument(
+        "--status",
+        choices=["pending", "included", "excluded", "maybe"],
+        help="Only update papers with this status",
+    )
+    update_citations_parser.add_argument(
+        "--delay",
+        type=float,
+        default=5.0,
+        help="Delay between Google Scholar requests in seconds (default: 5.0)",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -608,6 +671,8 @@ def main():
         set_status(args)
     elif args.command == "stats":
         show_stats(args)
+    elif args.command == "update-citations":
+        update_citations(args)
 
 
 if __name__ == "__main__":
