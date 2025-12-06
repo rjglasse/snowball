@@ -32,6 +32,9 @@ dev = [
 grobid = [
     "grobid-client-python>=0.1.0",
 ]
+google-scholar = [
+    "scholarly>=1.7.0",
+]
 
 [project.scripts]
 snowball = "snowball.cli:main"

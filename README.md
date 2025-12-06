@@ -209,6 +209,23 @@ snowball export my-slr-project --format csv
 snowball export my-slr-project --format all
 ```
 
+### 6. Update Citation Counts (Optional)
+
+Update citation counts from Google Scholar for more accurate/current data:
+
+```bash
+# Update all papers
+snowball update-citations my-slr-project
+
+# Update only included papers
+snowball update-citations my-slr-project --status included
+
+# Custom delay between requests (default: 5 seconds)
+snowball update-citations my-slr-project --delay 3
+```
+
+**Note:** This uses Google Scholar scraping via the `scholarly` library. Use responsibly with appropriate delays to avoid being rate-limited.
+
 ## Workflow
 
 ```
