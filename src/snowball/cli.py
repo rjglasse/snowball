@@ -568,6 +568,94 @@ def update_citations(args) -> None:
     logger.info(f"  Skipped: {stats['skipped']}")
 
 
+def parse_pdfs(args) -> None:
+    """Parse PDFs in the pdfs/ folder and attach references to matching papers."""
+    project_dir = Path(args.directory)
+
+    if not project_dir.exists():
+        logger.error(f"Project directory {project_dir} does not exist")
+        sys.exit(1)
+
+    # Load project
+    storage = JSONStorage(project_dir)
+    project = storage.load_project()
+
+    if not project:
+        logger.error("No project found. Run 'snowball init' first.")
+        sys.exit(1)
+
+    # Check for pdfs directory
+    pdfs_dir = project_dir / "pdfs"
+    if not pdfs_dir.exists():
+        logger.info(f"Creating pdfs directory: {pdfs_dir}")
+        pdfs_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("No PDFs found. Add PDFs named <paper-id>.pdf to this folder.")
+        return
+
+    # Find PDF files
+    pdf_files = list(pdfs_dir.glob("*.pdf"))
+    if not pdf_files:
+        logger.info("No PDF files found in pdfs/ directory.")
+        logger.info("Add PDFs named <paper-id>.pdf to parse references.")
+        return
+
+    logger.info(f"Found {len(pdf_files)} PDF files")
+
+    # Initialize parser
+    parser = PDFParser()
+    if not parser.grobid_available:
+        logger.warning("GROBID not available. Will use heuristic extraction (less accurate).")
+
+    # Process each PDF
+    processed = 0
+    skipped = 0
+    failed = 0
+
+    for pdf_path in pdf_files:
+        paper_id = pdf_path.stem  # filename without extension
+
+        # Check if paper exists
+        paper = storage.load_paper(paper_id)
+        if not paper:
+            logger.warning(f"No paper found with ID: {paper_id} (skipping {pdf_path.name})")
+            skipped += 1
+            continue
+
+        logger.info(f"Processing: {pdf_path.name} -> {truncate_title(paper.title, 50)}")
+
+        try:
+            # Parse PDF
+            result = parser.parse(pdf_path)
+
+            if result.references:
+                # Store GROBID references in raw_data
+                if paper.raw_data is None:
+                    paper.raw_data = {}
+                paper.raw_data["grobid_references"] = result.references
+                logger.info(f"  Extracted {len(result.references)} references")
+            else:
+                logger.warning(f"  No references extracted from PDF")
+
+            # Update paper
+            paper.pdf_path = str(pdf_path)
+            paper.references_unavailable = False  # Clear the flag
+            storage.save_paper(paper)
+
+            processed += 1
+
+        except Exception as e:
+            logger.error(f"  Failed to parse {pdf_path.name}: {e}")
+            failed += 1
+
+    logger.info(f"\nParse complete:")
+    logger.info(f"  Processed: {processed}")
+    logger.info(f"  Skipped (no matching paper): {skipped}")
+    logger.info(f"  Failed: {failed}")
+
+    if processed > 0:
+        logger.info("\nReferences will be used in the next snowball iteration.")
+
+
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -708,6 +796,12 @@ def main():
         help="Delay between Google Scholar requests in seconds (default: 5.0)",
     )
 
+    # Parse PDFs command
+    parse_pdfs_parser = subparsers.add_parser(
+        "parse-pdfs", help="Parse PDFs in pdfs/ folder and attach references to papers"
+    )
+    parse_pdfs_parser.add_argument("directory", help="Project directory")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -735,6 +829,8 @@ def main():
         show_stats(args)
     elif args.command == "update-citations":
         update_citations(args)
+    elif args.command == "parse-pdfs":
+        parse_pdfs(args)
 
 
 if __name__ == "__main__":

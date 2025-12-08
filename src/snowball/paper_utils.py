@@ -343,6 +343,12 @@ def format_paper_rich(paper: Paper) -> str:
         f"(iteration {paper.snowball_iteration})"
     )
 
+    # Refs unavailable warning
+    if paper.references_unavailable:
+        lines.append(
+            "[bold #ff6b6b]⚠ References unavailable - needs PDF[/bold #ff6b6b]"
+        )
+
     # Abstract
     if paper.abstract:
         lines.append("\n[bold #79c0ff]Abstract:[/bold #79c0ff]")

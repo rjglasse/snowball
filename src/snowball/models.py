@@ -83,6 +83,9 @@ class Paper(BaseModel):
     # File location
     pdf_path: Optional[str] = None
 
+    # Reference availability (for manual PDF fallback workflow)
+    references_unavailable: bool = Field(False, description="True if refs couldn't be fetched, needs PDF")
+
     # Raw data from APIs
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 

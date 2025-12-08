@@ -238,6 +238,7 @@ class SnowballApp(App):
         Binding("o", "open", "Open DOI/arXiv"),
         Binding("d", "toggle_details", "Toggle details"),
         Binding("r", "repair", "Repair/enrich metadata"),
+        Binding("u", "toggle_refs_unavailable", "Toggle refs unavailable"),
         # Project actions
         Binding("s", "snowball", "Run snowball"),
         Binding("x", "export", "Export"),
@@ -354,6 +355,10 @@ class SnowballApp(App):
                 "pending": "[#d29922]? Pending[/#d29922]",
                 "maybe": "[#a371f7]~ Maybe[/#a371f7]",
             }.get(status_val, "?")
+
+            # Add indicator if refs unavailable (needs PDF)
+            if paper.references_unavailable:
+                status_display += " [#ff6b6b]![/#ff6b6b]"
 
             # Title (truncate for readability)
             title = truncate_title(paper.title, max_length=160)
@@ -693,6 +698,29 @@ class SnowballApp(App):
         except Exception as e:
             self.notify(f"Repair failed: {e}", title="Error", severity="error")
 
+    def action_toggle_refs_unavailable(self) -> None:
+        """Toggle the references_unavailable flag for the current paper."""
+        if not self.current_paper:
+            self.notify("No paper selected", severity="warning")
+            return
+
+        paper = self.current_paper
+        paper.references_unavailable = not paper.references_unavailable
+        self.storage.save_paper(paper)
+
+        if paper.references_unavailable:
+            self.notify(
+                f"Marked as needing PDF. Download and save to:\npdfs/{paper.id}.pdf",
+                title="Refs unavailable",
+                severity="warning"
+            )
+        else:
+            self.notify("Refs unavailable flag cleared", title="Flag cleared")
+
+        # Refresh display
+        self._show_paper_details(paper)
+        self._refresh_table()
+
     def action_help(self) -> None:
         """Show help with all keybindings."""
         help_text = """
@@ -713,6 +741,7 @@ class SnowballApp(App):
 [bold]Paper Actions:[/bold]
   o           Open DOI/arXiv in browser
   r           Repair/enrich metadata from APIs
+  u           Toggle refs unavailable (needs PDF)
 
 [bold]Table:[/bold]
   Click header Sort by column (cycles: asc → desc → default)
