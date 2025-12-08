@@ -58,6 +58,9 @@ def init_project(args) -> None:
 
     project_dir.mkdir(parents=True, exist_ok=True)
 
+    # Create pdfs folder for manual PDF imports
+    (project_dir / "pdfs").mkdir(exist_ok=True)
+
     # Create storage
     storage = JSONStorage(project_dir)
 
