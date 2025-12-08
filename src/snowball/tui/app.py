@@ -315,6 +315,7 @@ class SnowballApp(App):
             self._get_column_label("Citations"),
             self._get_column_label("Source"),
             self._get_column_label("Iter"),
+            "PDF",
         )
 
         # Load and display papers
@@ -335,6 +336,7 @@ class SnowballApp(App):
             self._get_column_label("Citations"),
             self._get_column_label("Source"),
             self._get_column_label("Iter"),
+            "PDF",
         )
 
         papers = self.storage.load_all_papers()
@@ -370,6 +372,9 @@ class SnowballApp(App):
             source = get_source_value(paper.source)
             source_short = source[0].upper()
 
+            # PDF indicator
+            pdf_indicator = "[#58a6ff]pdf[/#58a6ff]" if paper.pdf_path else ""
+
             table.add_row(
                 status_display,
                 title,
@@ -377,6 +382,7 @@ class SnowballApp(App):
                 citations,
                 source_short,
                 str(paper.snowball_iteration),
+                pdf_indicator,
                 key=paper.id,
             )
 
