@@ -123,7 +123,7 @@ class SnowballApp(App):
         max-height: 25;
         width: 100%;
         background: #0d1117;
-        border-top: solid #30363d;
+        border: solid #30363d;
         padding: 0;
         overflow-y: auto;
     }
