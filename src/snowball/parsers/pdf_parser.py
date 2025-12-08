@@ -101,6 +101,16 @@ class PDFParser:
 
         return result
 
+    def _get_element_text(self, elem) -> str:
+        """Get all text content from an element, including child elements.
+
+        This handles cases like titles with subtitles in child elements:
+        <title>Main Title<title type="sub">: Subtitle</title></title>
+        """
+        if elem is None:
+            return ""
+        return ''.join(elem.itertext()).strip()
+
     def _parse_tei_xml(self, tei_xml: str) -> PDFParseResult:
         """Parse GROBID's TEI XML output."""
         import xml.etree.ElementTree as ET
@@ -110,10 +120,11 @@ class PDFParser:
             root = ET.fromstring(tei_xml)
             ns = {'tei': 'http://www.tei-c.org/ns/1.0'}
 
-            # Extract title
+            # Extract title (including any subtitles in child elements)
             title_elem = root.find('.//tei:titleStmt/tei:title', ns)
-            if title_elem is not None and title_elem.text:
-                result.title = title_elem.text.strip()
+            title_text = self._get_element_text(title_elem)
+            if title_text:
+                result.title = title_text
 
             # Extract authors
             for author in root.findall('.//tei:sourceDesc//tei:author', ns):
@@ -158,10 +169,11 @@ class PDFParser:
         """Parse a biblStruct element from TEI XML."""
         ref = {}
 
-        # Title
+        # Title (including any subtitles in child elements)
         title_elem = biblStruct.find('.//tei:title', ns)
-        if title_elem is not None and title_elem.text:
-            ref['title'] = title_elem.text.strip()
+        title_text = self._get_element_text(title_elem)
+        if title_text:
+            ref['title'] = title_text
 
         # Authors
         authors = []

@@ -233,6 +233,25 @@ class TestPDFParserTEIParsing:
         assert result.doi == "10.1234/test.doi"
         assert result.abstract == "This is the abstract text."
 
+    def test_parse_tei_xml_title_with_subtitle(self, parser):
+        """Test parsing title with subtitle in child element (colon case)."""
+        tei_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <TEI xmlns="http://www.tei-c.org/ns/1.0">
+            <teiHeader>
+                <fileDesc>
+                    <titleStmt>
+                        <title level="a" type="main">Machine Learning in Healthcare<title level="a" type="sub">: A Systematic Review</title></title>
+                    </titleStmt>
+                </fileDesc>
+            </teiHeader>
+        </TEI>
+        """
+
+        result = parser._parse_tei_xml(tei_xml)
+
+        # Should include both main title and subtitle
+        assert result.title == "Machine Learning in Healthcare: A Systematic Review"
+
     def test_parse_tei_xml_invalid(self, parser):
         """Test parsing invalid TEI XML."""
         invalid_xml = "not valid xml"
