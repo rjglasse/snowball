@@ -101,6 +101,22 @@ class PDFParser:
 
         return result
 
+    def _clean_text(self, text: str) -> str:
+        """Clean text of Unicode artifacts from PDF extraction.
+
+        Removes problematic characters like \ufffe, \uffff, and other
+        replacement/special characters that GROBID sometimes produces.
+        """
+        if not text:
+            return text
+        # Remove Unicode replacement and special characters
+        # \ufffe and \uffff are "not a character" code points
+        # \ufffd is the replacement character
+        text = re.sub(r'[\ufffe\uffff\ufffd]', '', text)
+        # Collapse multiple spaces that might result from removal
+        text = re.sub(r' +', ' ', text)
+        return text.strip()
+
     def _get_element_text(self, elem) -> str:
         """Get all text content from an element, including child elements.
 
@@ -109,7 +125,8 @@ class PDFParser:
         """
         if elem is None:
             return ""
-        return ''.join(elem.itertext()).strip()
+        text = ''.join(elem.itertext()).strip()
+        return self._clean_text(text)
 
     def _parse_tei_xml(self, tei_xml: str) -> PDFParseResult:
         """Parse GROBID's TEI XML output."""
@@ -134,7 +151,7 @@ class PDFParser:
                     surname = persName.find('.//tei:surname', ns)
                     if forename is not None and surname is not None:
                         name = f"{forename.text} {surname.text}".strip()
-                        result.authors.append(name)
+                        result.authors.append(self._clean_text(name))
 
             # Extract year
             date_elem = root.find('.//tei:sourceDesc//tei:date[@type="published"]', ns)
@@ -189,7 +206,7 @@ class PDFParser:
                     if surname.text:
                         name_parts.append(surname.text.strip())
                     if name_parts:
-                        authors.append(' '.join(name_parts))
+                        authors.append(self._clean_text(' '.join(name_parts)))
         if authors:
             ref['authors'] = authors
 
@@ -345,8 +362,8 @@ class PDFParser:
                 if year_match:
                     ref['year'] = int(year_match.group(1))
 
-                # Store raw reference text
-                ref['raw'] = ref_content[:500]
+                # Store raw reference text (cleaned)
+                ref['raw'] = self._clean_text(ref_content[:500])
 
                 if ref:
                     references.append(ref)
