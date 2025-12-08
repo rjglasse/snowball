@@ -11,7 +11,7 @@ class TestGoogleScholarClient:
         """Test default rate limit delay."""
         from snowball.apis.google_scholar import GoogleScholarClient
         client = GoogleScholarClient()
-        assert client.rate_limit_delay == 5.0
+        assert client.rate_limit_delay == 2.0
 
     def test_init_custom_rate_limit(self):
         """Test custom rate limit delay."""

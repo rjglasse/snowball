@@ -15,12 +15,12 @@ class GoogleScholarClient:
     appropriate rate limiting to avoid being blocked.
     """
 
-    def __init__(self, rate_limit_delay: float = 5.0):
+    def __init__(self, rate_limit_delay: float = 2.0):
         """Initialize Google Scholar client.
 
         Args:
             rate_limit_delay: Delay between requests in seconds.
-                              Default is 5 seconds to avoid rate limiting.
+                              Default is 2 seconds to avoid rate limiting.
         """
         self.rate_limit_delay = rate_limit_delay
         self._scholarly = None

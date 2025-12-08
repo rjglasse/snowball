@@ -47,7 +47,7 @@ class SemanticScholarClient(BaseAPIClient):
         if rate_limit_delay is not None:
             self.rate_limit_delay = rate_limit_delay
         else:
-            self.rate_limit_delay = 2.0   # 2 seconds between requests
+            self.rate_limit_delay = 0.5   # 0.5 seconds between requests (safe for single enrichments)
         self.client = httpx.Client(timeout=30.0)
 
         if api_key:
