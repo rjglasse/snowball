@@ -776,6 +776,10 @@ class SnowballApp(App):
 
         paper = self.current_paper
 
+        # Save current cursor position
+        table = self.query_one("#papers-table", DataTable)
+        current_row_index = table.cursor_row
+
         # Track what was missing before
         had_abstract = bool(paper.abstract)
         had_year = paper.year is not None
@@ -810,6 +814,12 @@ class SnowballApp(App):
             # Refresh display
             self._show_paper_details(paper)
             self._refresh_table()
+
+            # Restore cursor position
+            table = self.query_one("#papers-table", DataTable)
+            if table.row_count > 0:
+                target_row = min(current_row_index, table.row_count - 1)
+                table.move_cursor(row=target_row)
 
         except Exception as e:
             self.notify(f"Enrich failed: {e}", title="Error", severity="error")
