@@ -232,10 +232,10 @@ class SnowballApp(App):
         Binding("e", "exclude", "Exclude"),
         Binding("left", "exclude", "Exclude (arrow)", show=False),
         Binding("m", "maybe", "Maybe"),
-        Binding("p", "pending", "Pending"),
         Binding("n", "notes", "Notes"),
         # Paper actions
         Binding("o", "open", "Open DOI/arXiv"),
+        Binding("p", "open_pdf", "Open local PDF"),
         Binding("d", "toggle_details", "Toggle details"),
         Binding("r", "repair", "Repair/enrich metadata"),
         # Project actions
@@ -586,6 +586,20 @@ class SnowballApp(App):
         if url:
             webbrowser.open(url)
 
+    def action_open_pdf(self) -> None:
+        """Open the local PDF file if available."""
+        if not self.current_paper:
+            return
+
+        if self.current_paper.pdf_path:
+            pdf_path = Path(self.current_paper.pdf_path)
+            if pdf_path.exists():
+                webbrowser.open(f"file://{pdf_path.absolute()}")
+            else:
+                self.notify(f"PDF file not found: {pdf_path}", severity="error")
+        else:
+            self.notify("No local PDF for this paper", severity="warning")
+
     def action_snowball(self) -> None:
         """Run a snowball iteration."""
         # This would be better as a background task, but for simplicity:
@@ -713,11 +727,11 @@ class SnowballApp(App):
   i / →       Include paper (moves to next)
   e / ←       Exclude paper (moves to next)
   m           Mark as Maybe
-  p           Mark as Pending
   n           Add/edit notes
 
 [bold]Paper Actions:[/bold]
   o           Open DOI/arXiv in browser
+  p           Open local PDF
   r           Repair/enrich metadata from APIs
 
 [bold]Table:[/bold]
