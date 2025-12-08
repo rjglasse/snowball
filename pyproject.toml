@@ -21,6 +21,8 @@ dependencies = [
     "rich>=13.0.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.25.0",
+    "grobid-client-python>=0.1.0",
+    "scholarly>=1.7.0",
 ]
 
 [project.optional-dependencies]
@@ -28,12 +30,6 @@ dev = [
     "pytest>=7.4.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
-]
-grobid = [
-    "grobid-client-python>=0.1.0",
-]
-google-scholar = [
-    "scholarly>=1.7.0",
 ]
 
 [project.scripts]
