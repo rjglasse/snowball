@@ -850,6 +850,9 @@ class SnowballApp(App):
 
         worker_name = event.worker.name
 
+        # Clear the "working" notification before showing result
+        self.clear_notifications()
+
         if event.state == WorkerState.ERROR:
             self.notify(f"Operation failed: {event.worker.error}", title="Error", severity="error")
             return
