@@ -297,8 +297,9 @@ class SnowballApp(App):
         # Worker context for background tasks
         self._worker_context: dict = {}
 
-        # Event log for tracking actions
+        # Event log for tracking actions (display format and raw for file)
         self._event_log: list[str] = []
+        self._event_log_raw: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -355,6 +356,14 @@ class SnowballApp(App):
 
         # Load and display papers
         self._refresh_table()
+
+        # Load existing event log from file
+        self._load_event_log()
+
+        # Update log panel with loaded entries
+        if self._event_log:
+            log_content = self.query_one("#log-content", Static)
+            log_content.update("\n".join(self._event_log))
 
         # Log startup
         stats = self.storage.get_statistics()
@@ -480,20 +489,62 @@ class SnowballApp(App):
         detail_content.update(details_text)
 
     def _log_event(self, message: str) -> None:
-        """Add an event to the log panel."""
+        """Add an event to the log panel and persist to file."""
         from datetime import datetime
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        entry = f"[dim]{timestamp}[/dim] {message}"
-        self._event_log.append(entry)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Store with full timestamp for file, display with short timestamp
+        display_entry = f"[dim]{timestamp[11:]}[/dim] {message}"
+        file_entry = f"{timestamp} {message}"
 
-        # Keep only last 50 entries
-        if len(self._event_log) > 50:
-            self._event_log = self._event_log[-50:]
+        self._event_log.append(display_entry)
+        self._event_log_raw.append(file_entry)
+
+        # Keep only last 100 entries
+        if len(self._event_log) > 100:
+            self._event_log = self._event_log[-100:]
+            self._event_log_raw = self._event_log_raw[-100:]
+
+        # Persist to file
+        self._save_event_log()
 
         # Update the log panel
         log_content = self.query_one("#log-content", Static)
         log_content.update("\n".join(self._event_log))
+
+    def _load_event_log(self) -> None:
+        """Load event log from file."""
+        log_file = self.project_dir / "event_log.txt"
+        self._event_log = []
+        self._event_log_raw = []
+
+        if log_file.exists():
+            try:
+                with open(log_file, "r") as f:
+                    lines = f.read().strip().split("\n")
+                    # Keep last 100 entries
+                    lines = lines[-100:] if len(lines) > 100 else lines
+                    for line in lines:
+                        if line.strip():
+                            self._event_log_raw.append(line)
+                            # Convert to display format (extract time portion)
+                            if len(line) >= 19:  # "YYYY-MM-DD HH:MM:SS"
+                                time_part = line[11:19]
+                                msg_part = line[20:] if len(line) > 20 else ""
+                                self._event_log.append(f"[dim]{time_part}[/dim] {msg_part}")
+                            else:
+                                self._event_log.append(line)
+            except Exception:
+                pass  # Start fresh if file is corrupted
+
+    def _save_event_log(self) -> None:
+        """Save event log to file."""
+        log_file = self.project_dir / "event_log.txt"
+        try:
+            with open(log_file, "w") as f:
+                f.write("\n".join(self._event_log_raw))
+        except Exception:
+            pass  # Ignore save errors
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         """Handle row cursor movement - show details automatically."""
