@@ -225,6 +225,20 @@ def review(args) -> None:
     api = APIAggregator(s2_api_key=s2_api_key, email=email)
     engine = SnowballEngine(storage, api)
 
+    # Redirect logging to file to avoid corrupting TUI display
+    log_file = project_dir / "snowball.log"
+    root_logger = logging.getLogger()
+
+    # Remove existing handlers and add file handler
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    ))
+    root_logger.addHandler(file_handler)
+
     # Launch TUI
     run_tui(project_dir, storage, engine, project)
 
