@@ -17,6 +17,7 @@ from textual.widgets import (
 )
 from textual.binding import Binding
 from textual.screen import ModalScreen
+from textual.worker import Worker, WorkerState
 
 from ..models import Paper, PaperStatus, ReviewProject
 from ..storage.json_storage import JSONStorage
@@ -31,6 +32,38 @@ from ..paper_utils import (
     format_paper_rich,
     truncate_title,
 )
+
+
+class WorkingDialog(ModalScreen[None]):
+    """Modal dialog shown during long-running operations."""
+
+    DEFAULT_CSS = """
+    WorkingDialog {
+        align: center middle;
+    }
+
+    #working-dialog {
+        width: 40;
+        height: 5;
+        border: thick #58a6ff;
+        background: #161b22;
+        padding: 1 2;
+    }
+
+    #working-dialog Label {
+        width: 100%;
+        text-align: center;
+        color: #58a6ff;
+    }
+    """
+
+    def __init__(self, message: str = "Working..."):
+        super().__init__()
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        with Container(id="working-dialog"):
+            yield Label(f"⏳ {self.message}")
 
 
 class ReviewDialog(ModalScreen[Optional[tuple]]):
@@ -603,13 +636,35 @@ class SnowballApp(App):
 
     def action_snowball(self) -> None:
         """Run a snowball iteration."""
-        # This would be better as a background task, but for simplicity:
-        self.engine.run_snowball_iteration(self.project)
-        self.project = self.storage.load_project()
-        self._refresh_table()
+        # Show working dialog
+        working = WorkingDialog("Running snowball...")
+        self.push_screen(working)
 
-        # Show notification (in a real app, use a notification widget)
-        # For now, just update the stats
+        def do_snowball() -> int:
+            """Run snowball in background thread."""
+            old_count = len(self.storage.load_all_papers())
+            self.engine.run_snowball_iteration(self.project)
+            new_count = len(self.storage.load_all_papers())
+            return new_count - old_count
+
+        def on_complete(worker: Worker) -> None:
+            """Handle snowball completion."""
+            self.pop_screen()
+
+            if worker.state == WorkerState.ERROR:
+                self.notify(f"Snowball failed: {worker.error}", title="Error", severity="error")
+                return
+
+            new_papers = worker.result
+            self.project = self.storage.load_project()
+            self._refresh_table()
+
+            if new_papers > 0:
+                self.notify(f"Found {new_papers} new papers", title="Snowball complete", severity="information")
+            else:
+                self.notify("No new papers found", title="Snowball complete", severity="warning")
+
+        self.run_worker(do_snowball, thread=True).add_callback(on_complete)
 
     def action_export(self) -> None:
         """Export papers."""
@@ -665,60 +720,77 @@ class SnowballApp(App):
             self.notify("No PDF files in pdfs/ folder", severity="warning")
             return
 
-        # Load all papers for matching
-        all_papers = self.storage.load_all_papers()
+        # Show working dialog
+        working = WorkingDialog("Parsing PDFs...")
+        self.push_screen(working)
 
-        # Initialize parser
-        pdf_parser = PDFParser()
+        def do_parse() -> dict:
+            """Parse PDFs in background thread."""
+            all_papers = self.storage.load_all_papers()
+            pdf_parser = PDFParser()
 
-        self.notify(f"Parsing {len(pdf_files)} PDFs...", title="Scanning")
+            processed = 0
+            no_match = 0
 
-        processed = 0
-        no_match = 0
-
-        for pdf_path in pdf_files:
-            # Skip if already linked to a paper
-            already_linked = any(
-                p.pdf_path and Path(p.pdf_path).name == pdf_path.name
-                for p in all_papers
-            )
-            if already_linked:
-                continue
-
-            try:
-                result = pdf_parser.parse(pdf_path)
-                if not result.title:
+            for pdf_path in pdf_files:
+                # Skip if already linked to a paper
+                already_linked = any(
+                    p.pdf_path and Path(p.pdf_path).name == pdf_path.name
+                    for p in all_papers
+                )
+                if already_linked:
                     continue
 
-                # Find matching paper by title (fuzzy match)
-                matched_paper = self._find_paper_by_title_fuzzy(all_papers, result.title)
+                try:
+                    result = pdf_parser.parse(pdf_path)
+                    if not result.title:
+                        continue
 
-                if matched_paper:
-                    # Store references
-                    if result.references:
-                        if matched_paper.raw_data is None:
-                            matched_paper.raw_data = {}
-                        matched_paper.raw_data["grobid_references"] = result.references
+                    # Find matching paper by title (fuzzy match)
+                    matched_paper = self._find_paper_by_title_fuzzy(all_papers, result.title)
 
-                    matched_paper.pdf_path = str(pdf_path)
-                    self.storage.save_paper(matched_paper)
-                    processed += 1
-                else:
-                    no_match += 1
+                    if matched_paper:
+                        # Store references
+                        if result.references:
+                            if matched_paper.raw_data is None:
+                                matched_paper.raw_data = {}
+                            matched_paper.raw_data["grobid_references"] = result.references
 
-            except Exception:
-                pass  # Skip failed parses silently
+                        matched_paper.pdf_path = str(pdf_path)
+                        self.storage.save_paper(matched_paper)
+                        processed += 1
+                    else:
+                        no_match += 1
 
-        self._refresh_table()
+                except Exception:
+                    pass  # Skip failed parses silently
 
-        if processed > 0 or no_match > 0:
-            self.notify(
-                f"Matched: {processed}, No match: {no_match}",
-                title="Parse complete",
-                severity="information" if processed > 0 else "warning"
-            )
-        else:
-            self.notify("No new PDFs to process", severity="information")
+            return {"processed": processed, "no_match": no_match}
+
+        def on_complete(worker: Worker) -> None:
+            """Handle parse completion."""
+            self.pop_screen()
+
+            if worker.state == WorkerState.ERROR:
+                self.notify(f"Parse failed: {worker.error}", title="Error", severity="error")
+                return
+
+            result = worker.result
+            processed = result["processed"]
+            no_match = result["no_match"]
+
+            self._refresh_table()
+
+            if processed > 0 or no_match > 0:
+                self.notify(
+                    f"Matched: {processed}, No match: {no_match}",
+                    title="Parse complete",
+                    severity="information" if processed > 0 else "warning"
+                )
+            else:
+                self.notify("No new PDFs to process", severity="information")
+
+        self.run_worker(do_parse, thread=True).add_callback(on_complete)
 
     def _find_paper_by_title_fuzzy(self, papers: list, title: str, threshold: float = 0.8):
         """Find a paper by fuzzy title match."""
@@ -786,24 +858,44 @@ class SnowballApp(App):
         had_citations = paper.citation_count is not None
         had_doi = bool(paper.doi)
 
-        self.notify(f"Enriching: {paper.title[:50]}...", title="Enriching")
+        # Show working dialog
+        working = WorkingDialog("Enriching metadata...")
+        self.push_screen(working)
 
-        try:
-            # Enrich from APIs
+        def do_enrich() -> dict:
+            """Run enrichment in background thread."""
             self.engine.api.enrich_metadata(paper)
-
-            # Save the updated paper
             self.storage.save_paper(paper)
+            return {
+                "paper": paper,
+                "had_abstract": had_abstract,
+                "had_year": had_year,
+                "had_citations": had_citations,
+                "had_doi": had_doi,
+                "cursor_row": current_row_index,
+            }
+
+        def on_complete(worker: Worker) -> None:
+            """Handle enrichment completion."""
+            # Dismiss working dialog
+            self.pop_screen()
+
+            if worker.state == WorkerState.ERROR:
+                self.notify(f"Enrich failed: {worker.error}", title="Error", severity="error")
+                return
+
+            result = worker.result
+            paper = result["paper"]
 
             # Build report of what was added
             updates = []
-            if not had_abstract and paper.abstract:
+            if not result["had_abstract"] and paper.abstract:
                 updates.append("abstract")
-            if not had_year and paper.year:
+            if not result["had_year"] and paper.year:
                 updates.append("year")
-            if not had_citations and paper.citation_count is not None:
+            if not result["had_citations"] and paper.citation_count is not None:
                 updates.append("citations")
-            if not had_doi and paper.doi:
+            if not result["had_doi"] and paper.doi:
                 updates.append("DOI")
 
             if updates:
@@ -818,11 +910,11 @@ class SnowballApp(App):
             # Restore cursor position
             table = self.query_one("#papers-table", DataTable)
             if table.row_count > 0:
-                target_row = min(current_row_index, table.row_count - 1)
+                target_row = min(result["cursor_row"], table.row_count - 1)
                 table.move_cursor(row=target_row)
 
-        except Exception as e:
-            self.notify(f"Enrich failed: {e}", title="Error", severity="error")
+        # Run in background thread
+        self.run_worker(do_enrich, thread=True).add_callback(on_complete)
 
     def action_help(self) -> None:
         """Show help with all keybindings."""
