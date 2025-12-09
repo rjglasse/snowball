@@ -121,15 +121,15 @@ class SnowballApp(App):
 
     /* Bottom section with details and log */
     #bottom-section {
-        height: 0;
+        height: auto;
         max-height: 20;
         width: 100%;
         layout: horizontal;
     }
 
-    #bottom-section.visible {
-        height: auto;
-        max-height: 20;
+    #bottom-section.hidden {
+        height: 0;
+        display: none;
     }
 
     /* Detail panel (left, 66%) */
@@ -309,7 +309,7 @@ class SnowballApp(App):
         yield DataTable(id="papers-table", cursor_type="row")
 
         # Bottom section with details (left) and log (right)
-        with Horizontal(id="bottom-section", classes="visible"):
+        with Horizontal(id="bottom-section"):
             # Detail panel (66% width)
             with ScrollableContainer(id="detail-panel"):
                 yield Static("", classes="detail-content")
@@ -358,6 +358,15 @@ class SnowballApp(App):
 
         # Load and display papers
         self._refresh_table()
+
+        # Log startup
+        stats = self.storage.get_statistics()
+        self._log_event(f"Loaded project: {stats['total']} papers")
+
+        # Show first paper's details if available
+        papers = self.storage.load_all_papers()
+        if papers:
+            self._show_paper_details(papers[0])
 
     def _refresh_table(self) -> None:
         """Refresh the papers table."""
@@ -843,12 +852,10 @@ class SnowballApp(App):
     def action_toggle_details(self) -> None:
         """Toggle the bottom section (details + log) visibility."""
         bottom_section = self.query_one("#bottom-section")
-        if bottom_section.has_class("visible"):
-            bottom_section.remove_class("visible")
-            bottom_section.styles.height = 0
+        if bottom_section.has_class("hidden"):
+            bottom_section.remove_class("hidden")
         else:
-            bottom_section.add_class("visible")
-            bottom_section.styles.height = "auto"
+            bottom_section.add_class("hidden")
 
     def action_enrich(self) -> None:
         """Enrich the current paper's metadata from APIs."""
