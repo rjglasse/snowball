@@ -253,8 +253,8 @@ class SnowballApp(App):
         Binding("space", "select_cursor", "Toggle details", show=False),
         # Review actions (shown in footer)
         Binding("i", "include", "Include"),
-        Binding("right", "include", "Include (arrow)", show=False),
-        Binding("left", "exclude", "Exclude (arrow)", show=False),
+        Binding("right", "include", "Include (arrow)", show=False, priority=True),
+        Binding("left", "exclude", "Exclude (arrow)", show=False, priority=True),
         Binding("m", "maybe", "Maybe"),
         Binding("n", "notes", "Notes"),
         # Paper actions
@@ -497,13 +497,14 @@ class SnowballApp(App):
         display_entry = f"[dim]{timestamp[11:]}[/dim] {message}"
         file_entry = f"{timestamp} {message}"
 
-        self._event_log.append(display_entry)
-        self._event_log_raw.append(file_entry)
+        # Insert at beginning (newest first)
+        self._event_log.insert(0, display_entry)
+        self._event_log_raw.insert(0, file_entry)
 
         # Keep only last 100 entries
         if len(self._event_log) > 100:
-            self._event_log = self._event_log[-100:]
-            self._event_log_raw = self._event_log_raw[-100:]
+            self._event_log = self._event_log[:100]
+            self._event_log_raw = self._event_log_raw[:100]
 
         # Persist to file
         self._save_event_log()
@@ -513,7 +514,7 @@ class SnowballApp(App):
         log_content.update("\n".join(self._event_log))
 
     def _load_event_log(self) -> None:
-        """Load event log from file."""
+        """Load event log from file (stored newest first)."""
         log_file = self.project_dir / "event_log.txt"
         self._event_log = []
         self._event_log_raw = []
@@ -522,8 +523,8 @@ class SnowballApp(App):
             try:
                 with open(log_file, "r") as f:
                     lines = f.read().strip().split("\n")
-                    # Keep last 100 entries
-                    lines = lines[-100:] if len(lines) > 100 else lines
+                    # Keep first 100 entries (newest first in file)
+                    lines = lines[:100] if len(lines) > 100 else lines
                     for line in lines:
                         if line.strip():
                             self._event_log_raw.append(line)
