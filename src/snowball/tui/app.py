@@ -367,7 +367,7 @@ class SnowballApp(App):
 
         # Log startup
         stats = self.storage.get_statistics()
-        self._log_event(f"Loaded project: {stats['total']} papers")
+        self._log_event(f"[#58a6ff]Loaded:[/#58a6ff] {stats['total']} papers")
 
         # Show first paper's details if available
         papers = self.storage.load_all_papers()
@@ -608,13 +608,13 @@ class SnowballApp(App):
 
         # Log the status change
         title_short = truncate_title(self.current_paper.title, max_length=40)
-        status_colors = {
-            PaperStatus.INCLUDED: "[#3fb950]included[/#3fb950]",
-            PaperStatus.EXCLUDED: "[#f85149]excluded[/#f85149]",
-            PaperStatus.MAYBE: "[#a371f7]maybe[/#a371f7]",
-            PaperStatus.PENDING: "[#d29922]pending[/#d29922]",
+        status_labels = {
+            PaperStatus.INCLUDED: "[#3fb950]Included:[/#3fb950]",
+            PaperStatus.EXCLUDED: "[#f85149]Excluded:[/#f85149]",
+            PaperStatus.MAYBE: "[#a371f7]Maybe:[/#a371f7]",
+            PaperStatus.PENDING: "[#d29922]Pending:[/#d29922]",
         }
-        self._log_event(f"Marked {status_colors.get(status, status.value)}: {title_short}")
+        self._log_event(f"{status_labels.get(status, status.value + ':')} {title_short}")
 
         # Update the paper status (pass project for iteration stats tracking)
         self.engine.update_paper_review(
@@ -733,10 +733,10 @@ class SnowballApp(App):
 
         if new_papers > 0:
             self.notify(f"Found {new_papers} new papers", title="Snowball complete", severity="information")
-            self._log_event(f"[#a371f7]Snowball[/#a371f7] iteration {self.project.current_iteration}: +{new_papers} papers")
+            self._log_event(f"[#a371f7]Snowball:[/#a371f7] iteration {self.project.current_iteration}, +{new_papers} papers")
         else:
             self.notify("No new papers found", title="Snowball complete", severity="warning")
-            self._log_event(f"[#a371f7]Snowball[/#a371f7] iteration {self.project.current_iteration}: no new papers")
+            self._log_event(f"[#a371f7]Snowball:[/#a371f7] iteration {self.project.current_iteration}, no new papers")
 
     def action_export(self) -> None:
         """Export papers."""
@@ -756,7 +756,7 @@ class SnowballApp(App):
         csv_exporter.export(papers, csv_path, only_included=False)
 
         self.notify("Exported BibTeX and CSV", title="Export complete", severity="information")
-        self._log_event(f"[#d29922]Exported[/#d29922] {included_count} included → BibTeX, {len(papers)} total → CSV")
+        self._log_event(f"[#d29922]Exported:[/#d29922] {included_count} included → BibTeX, {len(papers)} total → CSV")
 
     def action_filter(self) -> None:
         """Cycle through filter states: all → pending → included → excluded → maybe → all."""
@@ -861,7 +861,7 @@ class SnowballApp(App):
                 title="Parse complete",
                 severity="information" if processed > 0 else "warning"
             )
-            self._log_event(f"[#58a6ff]PDF parse[/#58a6ff] matched: {processed}, unmatched: {no_match}")
+            self._log_event(f"[#58a6ff]PDF parse:[/#58a6ff] matched {processed}, unmatched {no_match}")
         else:
             self.notify("No new PDFs to process", severity="information")
 
@@ -981,10 +981,10 @@ class SnowballApp(App):
         title_short = truncate_title(paper.title, max_length=30)
         if updates:
             self.notify(f"Added: {', '.join(updates)}", title="Enriched", severity="information")
-            self._log_event(f"[#58a6ff]Enriched[/#58a6ff] {title_short}: +{', '.join(updates)}")
+            self._log_event(f"[#58a6ff]Enriched:[/#58a6ff] {title_short} +{', '.join(updates)}")
         else:
             self.notify("No new metadata found", title="Enriched", severity="warning")
-            self._log_event(f"[#58a6ff]Enriched[/#58a6ff] {title_short}: no new data")
+            self._log_event(f"[#58a6ff]Enriched:[/#58a6ff] {title_short} (no new data)")
 
         # Refresh display
         self._show_paper_details(paper)
