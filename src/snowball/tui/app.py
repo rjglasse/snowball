@@ -421,7 +421,7 @@ class SnowballApp(App):
 
             # Source
             source = get_source_value(paper.source)
-            source_short = source[0].upper()
+            source_short = {"seed": "Seed", "backward": "Bkd", "forward": "Fwd"}.get(source, source)
 
             # PDF indicator
             pdf_indicator = "[#58a6ff]pdf[/#58a6ff]" if paper.pdf_path else ""
