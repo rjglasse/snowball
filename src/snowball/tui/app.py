@@ -153,11 +153,13 @@ class SnowballApp(App):
         background: #0d1117;
         border: solid #30363d;
         overflow-y: auto;
+        overflow-x: hidden;
     }
 
     #log-content {
         padding: 0 1;
         color: #8b949e;
+        overflow-x: hidden;
     }
 
     .log-header {
@@ -613,14 +615,13 @@ class SnowballApp(App):
         current_row_index = table.cursor_row
 
         # Log the status change
-        title_short = truncate_title(self.current_paper.title, max_length=60)
         status_labels = {
             PaperStatus.INCLUDED: "[#3fb950]Included:[/#3fb950]",
             PaperStatus.EXCLUDED: "[#f85149]Excluded:[/#f85149]",
             PaperStatus.MAYBE: "[#a371f7]Maybe:[/#a371f7]",
             PaperStatus.PENDING: "[#d29922]Pending:[/#d29922]",
         }
-        self._log_event(f"{status_labels.get(status, status.value + ':')} {title_short}")
+        self._log_event(f"{status_labels.get(status, status.value + ':')} {self.current_paper.title}")
 
         # Update the paper status (pass project for iteration stats tracking)
         self.engine.update_paper_review(
@@ -984,13 +985,12 @@ class SnowballApp(App):
         if not ctx.get("had_doi") and paper.doi:
             updates.append("DOI")
 
-        title_short = truncate_title(paper.title, max_length=50)
         if updates:
             self.notify(f"Added: {', '.join(updates)}", title="Enriched", severity="information")
-            self._log_event(f"[#58a6ff]Enriched:[/#58a6ff] {title_short} +{', '.join(updates)}")
+            self._log_event(f"[#58a6ff]Enriched:[/#58a6ff] {paper.title} +{', '.join(updates)}")
         else:
             self.notify("No new metadata found", title="Enriched", severity="warning")
-            self._log_event(f"[#58a6ff]Enriched:[/#58a6ff] {title_short} (no new data)")
+            self._log_event(f"[#58a6ff]Enriched:[/#58a6ff] {paper.title} (no new data)")
 
         # Refresh display
         self._show_paper_details(paper)
