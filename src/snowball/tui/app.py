@@ -259,6 +259,7 @@ class SnowballApp(App):
         Binding("left", "exclude", "Exclude (arrow)", show=False, priority=True),
         Binding("m", "maybe", "Maybe"),
         Binding("n", "notes", "Notes"),
+        Binding("u", "undo", "Undo"),
         # Paper actions
         Binding("o", "open", "Open DOI/arXiv"),
         Binding("p", "open_pdf", "Open local PDF"),
@@ -302,6 +303,9 @@ class SnowballApp(App):
         # Event log for tracking actions (display format and raw for file)
         self._event_log: list[str] = []
         self._event_log_raw: list[str] = []
+
+        # Undo stack for status changes: (paper_id, previous_status, title)
+        self._last_status_change: Optional[tuple[str, PaperStatus, str]] = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -610,6 +614,13 @@ class SnowballApp(App):
         if not self.current_paper:
             return
 
+        # Save for undo before changing
+        self._last_status_change = (
+            self.current_paper.id,
+            self.current_paper.status,
+            self.current_paper.title,
+        )
+
         # Get the current table position
         table = self.query_one("#papers-table", DataTable)
         current_row_index = table.cursor_row
@@ -660,6 +671,45 @@ class SnowballApp(App):
     def action_pending(self) -> None:
         """Mark the selected paper as pending."""
         self._update_paper_status(PaperStatus.PENDING)
+
+    def action_undo(self) -> None:
+        """Undo the last status change."""
+        if not self._last_status_change:
+            self.notify("Nothing to undo", severity="warning")
+            return
+
+        paper_id, previous_status, title = self._last_status_change
+
+        # Load the paper and restore its status
+        paper = self.storage.load_paper(paper_id)
+        if not paper:
+            self.notify("Paper not found", severity="error")
+            return
+
+        # Update the paper status back to previous
+        self.engine.update_paper_review(
+            paper_id,
+            previous_status,
+            paper.notes,
+            project=self.project
+        )
+
+        # Log the undo
+        status_labels = {
+            PaperStatus.INCLUDED: "[#3fb950]Included[/#3fb950]",
+            PaperStatus.EXCLUDED: "[#f85149]Excluded[/#f85149]",
+            PaperStatus.MAYBE: "[#a371f7]Maybe[/#a371f7]",
+            PaperStatus.PENDING: "[#d29922]Pending[/#d29922]",
+        }
+        status_label = status_labels.get(previous_status, previous_status.value)
+        self._log_event(f"[dim]Undo:[/dim] {title} → {status_label}")
+
+        # Clear the undo state (can only undo once)
+        self._last_status_change = None
+
+        # Refresh display
+        self._refresh_table()
+        self.notify(f"Undone: restored to {previous_status.value}", severity="information")
 
     def action_notes(self) -> None:
         """Add/edit notes for the selected paper."""
