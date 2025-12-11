@@ -308,11 +308,11 @@ class SnowballApp(App):
 
         # Bottom section with details (left) and log (right)
         with Horizontal(id="bottom-section"):
-            # Detail panel (66% width)
+            # Detail panel (50% width)
             with ScrollableContainer(id="detail-panel"):
                 yield Static("Select a paper to view details", id="detail-content", classes="detail-content")
 
-            # Event log panel (33% width)
+            # Event log panel (50% width)
             with ScrollableContainer(id="log-panel"):
                 yield Static("[bold #58a6ff]Event Log[/bold #58a6ff]", classes="log-header")
                 yield Static("", id="log-content")
@@ -613,7 +613,7 @@ class SnowballApp(App):
         current_row_index = table.cursor_row
 
         # Log the status change
-        title_short = truncate_title(self.current_paper.title, max_length=40)
+        title_short = truncate_title(self.current_paper.title, max_length=60)
         status_labels = {
             PaperStatus.INCLUDED: "[#3fb950]Included:[/#3fb950]",
             PaperStatus.EXCLUDED: "[#f85149]Excluded:[/#f85149]",
@@ -984,7 +984,7 @@ class SnowballApp(App):
         if not ctx.get("had_doi") and paper.doi:
             updates.append("DOI")
 
-        title_short = truncate_title(paper.title, max_length=30)
+        title_short = truncate_title(paper.title, max_length=50)
         if updates:
             self.notify(f"Added: {', '.join(updates)}", title="Enriched", severity="information")
             self._log_event(f"[#58a6ff]Enriched:[/#58a6ff] {title_short} +{', '.join(updates)}")
