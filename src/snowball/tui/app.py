@@ -78,27 +78,40 @@ class ReviewDialog(ModalScreen[Optional[tuple]]):
 class MetadataMismatchDialog(ModalScreen[Optional[dict]]):
     """Dialog to show metadata mismatches and let user approve/reject changes."""
 
-    def __init__(self, mismatches: list[tuple[str, str, str]]):
+    def __init__(self, mismatches: list[tuple[str, str, str]], doi: str = None):
         """Initialize with list of (field_name, current_value, api_value) tuples."""
         super().__init__()
         self.mismatches = mismatches
+        self.doi = doi
         self.selections: dict[str, bool] = {m[0]: False for m in mismatches}
 
     def compose(self) -> ComposeResult:
         with Container(id="mismatch-dialog"):
             yield Label("[bold #d29922]Metadata Mismatch Detected[/bold #d29922]\n")
-            yield Label("The API returned different values. Select which to update:\n")
+
+            if self.doi:
+                yield Label(f"[dim]DOI: {self.doi}[/dim]")
+                yield Label("The DOI lookup returned different values than the PDF/current data.")
+                yield Label("[dim]Note: PDF extraction (GROBID) can be imperfect. If you have a DOI,[/dim]")
+                yield Label("[dim]the API values are likely more accurate.[/dim]\n")
+            else:
+                yield Label("The API returned different values. Compare and choose:\n")
 
             for field, current, api_val in self.mismatches:
                 yield Label(f"[bold]{field}:[/bold]")
-                yield Label(f"  [dim]Current:[/dim] {current[:100]}{'...' if len(current) > 100 else ''}")
-                yield Label(f"  [#58a6ff]API:[/#58a6ff] {api_val[:100]}{'...' if len(api_val) > 100 else ''}")
-                yield Button(f"Update {field}", id=f"update-{field}", variant="primary")
+                current_display = current[:100] + ('...' if len(current) > 100 else '')
+                api_display = api_val[:100] + ('...' if len(api_val) > 100 else '')
+                yield Label(f"  [dim]PDF/Current:[/dim] {current_display}")
+                yield Label(f"  [#58a6ff]API/DOI:[/#58a6ff] {api_display}")
+                yield Button(f"Use API {field}", id=f"update-{field}", variant="primary")
                 yield Label("")  # Spacer
 
             with Horizontal():
-                yield Button("Done", variant="default", id="done-btn")
-                yield Button("Update All", variant="warning", id="update-all-btn")
+                yield Button("Keep Current", variant="default", id="done-btn")
+                if self.doi:
+                    yield Button("Trust DOI (Update All)", variant="success", id="update-all-btn")
+                else:
+                    yield Button("Use All API Values", variant="warning", id="update-all-btn")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id
@@ -112,7 +125,7 @@ class MetadataMismatchDialog(ModalScreen[Optional[dict]]):
             field = button_id[7:]  # Remove "update-" prefix
             self.selections[field] = True
             # Update button to show it's selected
-            event.button.label = f"✓ {field} will update"
+            event.button.label = f"✓ Will use API {field}"
             event.button.variant = "success"
 
 
@@ -1124,7 +1137,7 @@ class SnowballApp(App):
                 elif field == "Year":
                     self._worker_context["enrich"]["enriched_year"] = int(api_val)
 
-            self.push_screen(MetadataMismatchDialog(mismatches), self._on_mismatch_dialog_result)
+            self.push_screen(MetadataMismatchDialog(mismatches, doi=paper.doi), self._on_mismatch_dialog_result)
             return
 
         # No mismatches - proceed normally
