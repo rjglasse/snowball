@@ -125,7 +125,7 @@ class MetadataMismatchDialog(ModalScreen[Optional[dict]]):
             field = button_id[7:]  # Remove "update-" prefix
             self.selections[field] = True
             # Update button to show it's selected
-            event.button.label = f"✓ Will use API {field}"
+            event.button.disabled = True
             event.button.variant = "success"
 
 
