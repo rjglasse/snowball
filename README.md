@@ -2,6 +2,8 @@
 
 A terminal-based tool for conducting Systematic Literature Reviews (SLR) using the snowballing methodology.
 
+<img width="800" alt="snowball-tui" src="https://github.com/user-attachments/assets/d4809a60-0275-4d0a-98d1-3c18e0ea2f32" />
+
 ## Features
 
 - **Seed Paper Import**: Start from PDF files or DOIs
