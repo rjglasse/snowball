@@ -186,18 +186,20 @@ class SnowballEngine:
                     for ref_paper in references:
                         if self._is_new_paper(ref_paper, seen_identifiers):
                             # Check for fuzzy duplicates even if not exact match
-                            existing = self._find_and_merge_duplicate(ref_paper)
+                            existing = self._find_and_merge_duplicate(
+                                ref_paper, source_paper.id, next_iter
+                            )
                             if existing:
                                 merged_papers.append(existing)
                             else:
                                 ref_paper.source = PaperSource.BACKWARD
-                                ref_paper.source_paper_id = source_paper.id
+                                ref_paper.source_paper_ids = [source_paper.id]
                                 ref_paper.snowball_iteration = next_iter
                                 discovered_papers.append(ref_paper)
                                 self._mark_seen(ref_paper, seen_identifiers)
                                 backward_count += 1
                         else:
-                            # Exact duplicate found - merge
+                            # Exact duplicate from previous iteration - just merge metadata
                             existing = self._find_and_merge_duplicate(ref_paper)
                             if existing:
                                 merged_papers.append(existing)
@@ -211,18 +213,20 @@ class SnowballEngine:
                     for cit_paper in citations:
                         if self._is_new_paper(cit_paper, seen_identifiers):
                             # Check for fuzzy duplicates even if not exact match
-                            existing = self._find_and_merge_duplicate(cit_paper)
+                            existing = self._find_and_merge_duplicate(
+                                cit_paper, source_paper.id, next_iter
+                            )
                             if existing:
                                 merged_papers.append(existing)
                             else:
                                 cit_paper.source = PaperSource.FORWARD
-                                cit_paper.source_paper_id = source_paper.id
+                                cit_paper.source_paper_ids = [source_paper.id]
                                 cit_paper.snowball_iteration = next_iter
                                 discovered_papers.append(cit_paper)
                                 self._mark_seen(cit_paper, seen_identifiers)
                                 forward_count += 1
                         else:
-                            # Exact duplicate found - merge
+                            # Exact duplicate from previous iteration - just merge metadata
                             existing = self._find_and_merge_duplicate(cit_paper)
                             if existing:
                                 merged_papers.append(existing)
@@ -346,14 +350,20 @@ class SnowballEngine:
                 return False
         return True
 
-    def _find_and_merge_duplicate(self, paper: Paper) -> Optional[Paper]:
+    def _find_and_merge_duplicate(
+        self, paper: Paper, source_paper_id: Optional[str] = None, current_iteration: Optional[int] = None
+    ) -> Optional[Paper]:
         """Find and merge with an existing duplicate paper.
 
         Uses fuzzy matching on title and authors to find duplicates.
-        If found, increments observation_count on the existing paper.
+        If found, increments observation_count. Only adds source_paper_id if the
+        existing paper is from the same iteration (multiple papers from iteration
+        N-1 can all be sources for a paper discovered in iteration N).
 
         Args:
             paper: The potential duplicate paper
+            source_paper_id: ID of the paper that led to this discovery
+            current_iteration: The iteration being processed (to check if same iteration)
 
         Returns:
             The existing paper if a duplicate was found and merged, None otherwise
@@ -363,6 +373,16 @@ class SnowballEngine:
 
         if existing:
             existing.observation_count += 1
+
+            # Only add source if paper is from the SAME iteration (discovered earlier
+            # in this same iteration run). This allows multiple papers from iteration
+            # N-1 to be sources, but prevents cross-iteration source links.
+            if (source_paper_id and
+                current_iteration is not None and
+                existing.snowball_iteration == current_iteration and
+                source_paper_id not in existing.source_paper_ids):
+                existing.source_paper_ids.append(source_paper_id)
+
             # Merge any missing information from the new paper
             if not existing.doi and paper.doi:
                 existing.doi = paper.doi

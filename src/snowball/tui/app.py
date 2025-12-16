@@ -384,6 +384,7 @@ class SnowballApp(App):
         Binding("s", "snowball", "Run snowball"),
         Binding("x", "export", "Export"),
         Binding("f", "filter", "Filter papers"),
+        Binding("g", "graph", "Generate graph"),
         Binding("P", "parse_pdfs", "Parse PDFs in pdfs/"),
         # App actions
         Binding("question_mark", "help", "Show help"),
@@ -642,7 +643,25 @@ class SnowballApp(App):
 
     def _format_paper_details(self, paper: Paper) -> str:
         """Format paper details as rich text using shared function."""
-        return format_paper_rich(paper)
+        details = format_paper_rich(paper)
+
+        # Add connections (source papers that led to this discovery)
+        if paper.source_paper_ids:
+            connections = []
+            for source_id in paper.source_paper_ids:
+                source_paper = self.storage.load_paper(source_id)
+                if source_paper:
+                    # Truncate long titles
+                    title = source_paper.title
+                    if len(title) > 80:
+                        title = title[:77] + "..."
+                    connections.append(f"  • {title}")
+
+            if connections:
+                details += "\n\n[bold #79c0ff]Discovered via:[/bold #79c0ff]"
+                details += "\n" + "\n".join(connections)
+
+        return details
 
     def _show_paper_details(self, paper: Paper) -> None:
         """Show details for a paper in the detail panel."""
@@ -1000,6 +1019,41 @@ class SnowballApp(App):
 
         self.notify("Exported BibTeX and CSV", title="Export complete", severity="information")
         self._log_event(f"[#d29922]Exported:[/#d29922] {included_count} included → BibTeX, {len(papers)} total → CSV")
+
+    def action_graph(self) -> None:
+        """Generate citation network graph visualization."""
+        from ..visualization import generate_citation_graph
+
+        papers = self.storage.load_all_papers()
+
+        if not papers:
+            self.notify("No papers to visualize", severity="warning")
+            return
+
+        # Output to viz/ folder in project directory
+        viz_dir = self.project_dir / "viz"
+
+        self.notify("Generating graph...", title="Please wait")
+
+        output_path = generate_citation_graph(
+            papers=papers,
+            output_dir=viz_dir,
+            title=f"{self.project.name} - Citation Network",
+        )
+
+        if output_path:
+            self.notify(
+                f"Saved to {output_path.name}",
+                title="Graph generated",
+                severity="information",
+            )
+            self._log_event(f"[#58a6ff]Graph:[/#58a6ff] {output_path.name} ({len(papers)} papers)")
+        else:
+            self.notify(
+                "Install viz dependencies: pip install snowball-slr[viz]",
+                title="Missing dependencies",
+                severity="error",
+            )
 
     def action_filter(self) -> None:
         """Cycle through filter states: all → pending → included → excluded → maybe → all."""
@@ -1367,6 +1421,7 @@ class SnowballApp(App):
   s           Run snowball iteration
   x           Export papers (BibTeX + CSV)
   f           Filter papers (cycles: all → pending → included → excluded → maybe)
+  g           Generate citation graph (600 DPI PNG)
   P           Parse PDFs in pdfs/ folder (Shift+P)
 
 [bold]Other:[/bold]

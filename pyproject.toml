@@ -31,6 +31,10 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
 ]
+viz = [
+    "networkx>=3.0",
+    "matplotlib>=3.7.0",
+]
 
 [project.scripts]
 snowball = "snowball.cli:main"

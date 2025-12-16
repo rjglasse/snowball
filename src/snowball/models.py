@@ -71,7 +71,7 @@ class Paper(BaseModel):
     # Review data
     status: PaperStatus = PaperStatus.PENDING
     source: PaperSource
-    source_paper_id: Optional[str] = Field(None, description="ID of paper that led to this discovery")
+    source_paper_ids: List[str] = Field(default_factory=list, description="IDs of papers that led to this discovery")
     snowball_iteration: int = Field(0, description="Iteration when discovered (0 for seeds)")
     exclusion_type: Optional[ExclusionType] = Field(None, description="How paper was excluded (auto/manual)")
 
