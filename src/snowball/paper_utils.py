@@ -249,6 +249,112 @@ def titles_match(title1: str, title2: str, threshold: float = 0.7) -> bool:
     return title_similarity(title1, title2) >= threshold
 
 
+def normalize_author_name(name: str) -> str:
+    """Normalize author name for comparison.
+
+    Extracts last name (assumed to be last word) and lowercases.
+    Handles various formats like "John Smith", "J. Smith", "Smith, John".
+
+    Args:
+        name: Author name string
+
+    Returns:
+        Normalized name (lowercase last name)
+    """
+    if not name:
+        return ""
+    # Handle "Last, First" format
+    if "," in name:
+        name = name.split(",")[0].strip()
+    else:
+        # Get last word as surname
+        parts = name.strip().split()
+        name = parts[-1] if parts else ""
+    return name.lower()
+
+
+def authors_similarity(authors1: list, authors2: list) -> float:
+    """Calculate similarity between two author lists.
+
+    Compares normalized last names using Jaccard similarity.
+
+    Args:
+        authors1: First list of authors (Author objects or dicts with 'name')
+        authors2: Second list of authors (Author objects or dicts with 'name')
+
+    Returns:
+        Similarity score between 0.0 and 1.0
+    """
+    if not authors1 or not authors2:
+        return 0.0
+
+    def get_name(author):
+        if hasattr(author, 'name'):
+            return author.name
+        elif isinstance(author, dict):
+            return author.get('name', '')
+        return str(author)
+
+    names1 = {normalize_author_name(get_name(a)) for a in authors1}
+    names2 = {normalize_author_name(get_name(a)) for a in authors2}
+
+    # Remove empty names
+    names1 = {n for n in names1 if n}
+    names2 = {n for n in names2 if n}
+
+    if not names1 or not names2:
+        return 0.0
+
+    intersection = len(names1 & names2)
+    union = len(names1 | names2)
+
+    return intersection / union if union > 0 else 0.0
+
+
+def papers_are_duplicates(
+    paper1: Paper,
+    paper2: Paper,
+    title_threshold: float = 0.7,
+    author_threshold: float = 0.3
+) -> bool:
+    """Check if two papers are likely duplicates.
+
+    Papers are considered duplicates if:
+    - They have the same DOI (exact match), OR
+    - Their titles are similar (>= title_threshold) AND
+      their authors are similar (>= author_threshold)
+
+    Args:
+        paper1: First paper
+        paper2: Second paper
+        title_threshold: Minimum title similarity (default 0.7)
+        author_threshold: Minimum author similarity (default 0.3)
+
+    Returns:
+        True if papers are likely duplicates
+    """
+    # Exact DOI match is definitive
+    if paper1.doi and paper2.doi:
+        if paper1.doi.lower() == paper2.doi.lower():
+            return True
+
+    # Check title similarity
+    if not paper1.title or not paper2.title:
+        return False
+
+    title_sim = title_similarity(paper1.title, paper2.title)
+    if title_sim < title_threshold:
+        return False
+
+    # If titles match well, check authors (if available)
+    # If no authors on either side, rely on title match alone
+    if not paper1.authors or not paper2.authors:
+        return title_sim >= title_threshold
+
+    author_sim = authors_similarity(paper1.authors, paper2.authors)
+    return author_sim >= author_threshold
+
+
 def paper_to_dict(paper: Paper, include_abstract: bool = False) -> dict:
     """Convert paper to dictionary for JSON output.
 

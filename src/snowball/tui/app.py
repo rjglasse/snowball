@@ -1,10 +1,12 @@
 """Main TUI application using Textual."""
 
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, ScrollableContainer
+from textual.coordinate import Coordinate
 from textual.widgets import (
     Header,
     Footer,
@@ -423,6 +425,10 @@ class SnowballApp(App):
         # Undo stack for status changes: (paper_id, previous_status, title)
         self._last_status_change: Optional[tuple[str, PaperStatus, str]] = None
 
+        # Cached widget references for performance (set in on_mount)
+        self._detail_content: Optional[Static] = None
+        self._log_content: Optional[Static] = None
+
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="stats-panel"):
@@ -465,6 +471,10 @@ class SnowballApp(App):
 
     def on_mount(self) -> None:
         """Set up the table when app starts."""
+        # Cache widget references for performance (avoids repeated DOM queries)
+        self._detail_content = self.query_one("#detail-content", Static)
+        self._log_content = self.query_one("#log-content", Static)
+
         table = self.query_one("#papers-table", DataTable)
 
         # Add columns with sort indicators
@@ -486,10 +496,9 @@ class SnowballApp(App):
         # Load existing event log from file
         self._load_event_log()
 
-        # Update log panel with loaded entries
-        if self._event_log:
-            log_content = self.query_one("#log-content", Static)
-            log_content.update("\n".join(self._event_log))
+        # Update log panel with loaded entries (using cached reference)
+        if self._event_log and self._log_content:
+            self._log_content.update("\n".join(self._event_log))
 
         # Log startup
         stats = self.storage.get_statistics()
@@ -499,6 +508,9 @@ class SnowballApp(App):
         papers = self.storage.load_all_papers()
         if papers:
             self._show_paper_details(papers[0])
+
+        # Focus the table by default
+        table.focus()
 
     def _refresh_table(self) -> None:
         """Refresh the papers table."""
@@ -637,14 +649,12 @@ class SnowballApp(App):
         self.current_paper = paper
         details_text = self._format_paper_details(paper)
 
-        # Update the content
-        detail_content = self.query_one("#detail-content", Static)
-        detail_content.update(details_text)
+        # Update the content using cached reference (avoids DOM query on every call)
+        if self._detail_content:
+            self._detail_content.update(details_text)
 
     def _log_event(self, message: str) -> None:
         """Add an event to the log panel and persist to file."""
-        from datetime import datetime
-
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # Store with full timestamp for file, display with short timestamp
         display_entry = f"[dim]{timestamp[11:]}[/dim] {message}"
@@ -662,9 +672,9 @@ class SnowballApp(App):
         # Persist to file
         self._save_event_log()
 
-        # Update the log panel
-        log_content = self.query_one("#log-content", Static)
-        log_content.update("\n".join(self._event_log))
+        # Update the log panel using cached reference
+        if self._log_content:
+            self._log_content.update("\n".join(self._event_log))
 
     def _load_event_log(self) -> None:
         """Load event log from file (stored newest first)."""
@@ -808,8 +818,14 @@ class SnowballApp(App):
             target_row = min(current_row_index, table.row_count - 1)
             table.move_cursor(row=target_row)
 
-            # The move_cursor will trigger on_data_table_row_highlighted
-            # which will show the details automatically
+            # Immediately show details for the new current paper
+            # (don't wait for async on_data_table_row_highlighted event)
+            coord = Coordinate(target_row, 0)
+            row_key, _ = table.coordinate_to_cell_key(coord)
+            if row_key:
+                paper = self.storage.load_paper(row_key.value)
+                if paper:
+                    self._show_paper_details(paper)
 
     def action_include(self) -> None:
         """Mark the selected paper as included."""
@@ -925,10 +941,10 @@ class SnowballApp(App):
         # Show working notification
         self.notify("Running snowball...", timeout=60)
 
-        def do_snowball() -> int:
+        def do_snowball() -> dict:
             """Run snowball in background thread."""
-            self.engine.run_snowball_iteration(self.project)
-            return len(self.storage.load_all_papers())
+            result = self.engine.run_snowball_iteration(self.project)
+            return result
 
         self.run_worker(do_snowball, name="snowball", thread=True)
 
@@ -936,16 +952,31 @@ class SnowballApp(App):
         """Handle snowball worker completion."""
         ctx = self._worker_context.get("snowball", {})
         old_count = ctx.get("old_count", 0)
+        worker_result = ctx.get("worker_result", {})
 
         self.project = self.storage.load_project()
         new_count = len(self.storage.load_all_papers())
         new_papers = new_count - old_count
 
+        # Get merged papers from result
+        merged_papers = worker_result.get("merged_papers", []) if isinstance(worker_result, dict) else []
+        merged_count = len(merged_papers)
+
         self._refresh_table()
 
-        if new_papers > 0:
-            self.notify(f"Found {new_papers} new papers", title="Snowball complete", severity="information")
-            self._log_event(f"[#a371f7]Snowball:[/#a371f7] iteration {self.project.current_iteration}, +{new_papers} papers")
+        # Log merged papers first
+        for paper in merged_papers:
+            self._log_event(f"[#d29922]Merged:[/#d29922] {paper.title}")
+
+        if new_papers > 0 or merged_count > 0:
+            msg_parts = []
+            if new_papers > 0:
+                msg_parts.append(f"+{new_papers} new")
+            if merged_count > 0:
+                msg_parts.append(f"{merged_count} merged")
+            msg = ", ".join(msg_parts)
+            self.notify(f"Found {msg}", title="Snowball complete", severity="information")
+            self._log_event(f"[#a371f7]Snowball:[/#a371f7] iteration {self.project.current_iteration}, {msg}")
         else:
             self.notify("No new papers found", title="Snowball complete", severity="warning")
             self._log_event(f"[#a371f7]Snowball:[/#a371f7] iteration {self.project.current_iteration}, no new papers")
@@ -1181,6 +1212,9 @@ class SnowballApp(App):
                 self._worker_context["enrich"]["worker_result"] = event.worker.result
             self._handle_enrich_complete()
         elif worker_name == "snowball":
+            # Store worker result in context for handler
+            if hasattr(event.worker, 'result') and event.worker.result:
+                self._worker_context["snowball"]["worker_result"] = event.worker.result
             self._handle_snowball_complete()
         elif worker_name == "parse_pdfs":
             self._handle_parse_pdfs_complete()
@@ -1342,11 +1376,13 @@ class SnowballApp(App):
 
 Press any key to close this help.
 """
-        from textual.widgets import Static
-        from textual.containers import Container
-
-        # Simple notification-style help
         self.notify(help_text, title="Help", timeout=30)
+
+    def action_quit(self) -> None:
+        """Quit the application, ensuring all pending writes are flushed."""
+        # Flush any pending disk writes before exiting
+        self.storage.shutdown()
+        self.exit()
 
 
 def run_tui(

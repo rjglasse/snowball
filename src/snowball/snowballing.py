@@ -69,10 +69,8 @@ class SnowballEngine:
 
         logger.info(f"Extracted {len(parse_result.references)} references from PDF")
 
-        # Try to identify and enrich the paper using APIs
-        logger.info("Enriching paper metadata from APIs...")
-        paper = self.api.identify_paper(paper)
-        paper = self.api.enrich_metadata(paper)
+        # Note: We skip API enrichment here to keep seed addition fast.
+        # User can enrich later via the 'e' key in the TUI if needed.
 
         # Save the paper
         self.storage.save_paper(paper)
@@ -175,6 +173,7 @@ class SnowballEngine:
 
         backward_count = 0
         forward_count = 0
+        merged_papers = []  # Track papers that were merged with existing ones
 
         # Process each source paper
         for source_paper in source_papers:
@@ -186,15 +185,22 @@ class SnowballEngine:
                     references = self._get_references_for_paper(source_paper)
                     for ref_paper in references:
                         if self._is_new_paper(ref_paper, seen_identifiers):
-                            ref_paper.source = PaperSource.BACKWARD
-                            ref_paper.source_paper_id = source_paper.id
-                            ref_paper.snowball_iteration = next_iter
-                            discovered_papers.append(ref_paper)
-                            self._mark_seen(ref_paper, seen_identifiers)
-                            backward_count += 1
+                            # Check for fuzzy duplicates even if not exact match
+                            existing = self._find_and_merge_duplicate(ref_paper)
+                            if existing:
+                                merged_papers.append(existing)
+                            else:
+                                ref_paper.source = PaperSource.BACKWARD
+                                ref_paper.source_paper_id = source_paper.id
+                                ref_paper.snowball_iteration = next_iter
+                                discovered_papers.append(ref_paper)
+                                self._mark_seen(ref_paper, seen_identifiers)
+                                backward_count += 1
                         else:
-                            # Duplicate found - increment observation count
-                            self._increment_observation_count(ref_paper)
+                            # Exact duplicate found - merge
+                            existing = self._find_and_merge_duplicate(ref_paper)
+                            if existing:
+                                merged_papers.append(existing)
                 except Exception as e:
                     logger.error(f"Error getting references: {e}")
 
@@ -204,19 +210,26 @@ class SnowballEngine:
                     citations = self.api.get_citations(source_paper)
                     for cit_paper in citations:
                         if self._is_new_paper(cit_paper, seen_identifiers):
-                            cit_paper.source = PaperSource.FORWARD
-                            cit_paper.source_paper_id = source_paper.id
-                            cit_paper.snowball_iteration = next_iter
-                            discovered_papers.append(cit_paper)
-                            self._mark_seen(cit_paper, seen_identifiers)
-                            forward_count += 1
+                            # Check for fuzzy duplicates even if not exact match
+                            existing = self._find_and_merge_duplicate(cit_paper)
+                            if existing:
+                                merged_papers.append(existing)
+                            else:
+                                cit_paper.source = PaperSource.FORWARD
+                                cit_paper.source_paper_id = source_paper.id
+                                cit_paper.snowball_iteration = next_iter
+                                discovered_papers.append(cit_paper)
+                                self._mark_seen(cit_paper, seen_identifiers)
+                                forward_count += 1
                         else:
-                            # Duplicate found - increment observation count
-                            self._increment_observation_count(cit_paper)
+                            # Exact duplicate found - merge
+                            existing = self._find_and_merge_duplicate(cit_paper)
+                            if existing:
+                                merged_papers.append(existing)
                 except Exception as e:
                     logger.error(f"Error getting citations: {e}")
 
-        logger.info(f"Discovered {len(discovered_papers)} new papers")
+        logger.info(f"Discovered {len(discovered_papers)} new papers, merged {len(merged_papers)} duplicates")
         logger.info(f"  Backward: {backward_count}, Forward: {forward_count}")
 
         # Apply filters
@@ -258,7 +271,9 @@ class SnowballEngine:
             "backward": backward_count,
             "forward": forward_count,
             "auto_excluded": auto_excluded,
-            "for_review": len(filtered_papers)
+            "for_review": len(filtered_papers),
+            "merged": len(merged_papers),
+            "merged_papers": merged_papers,
         }
 
     def _get_references_for_paper(self, paper: Paper) -> List[Paper]:
@@ -331,28 +346,38 @@ class SnowballEngine:
                 return False
         return True
 
-    def _increment_observation_count(self, paper: Paper) -> None:
-        """Increment observation count for an existing paper.
+    def _find_and_merge_duplicate(self, paper: Paper) -> Optional[Paper]:
+        """Find and merge with an existing duplicate paper.
 
-        Finds the existing paper by DOI or title and increments its observation_count.
+        Uses fuzzy matching on title and authors to find duplicates.
+        If found, increments observation_count on the existing paper.
 
         Args:
-            paper: The duplicate paper (used to look up the existing one)
+            paper: The potential duplicate paper
+
+        Returns:
+            The existing paper if a duplicate was found and merged, None otherwise
         """
-        existing = None
-
-        # Try to find by DOI first
-        if paper.doi:
-            existing = self.storage.find_paper_by_doi(paper.doi)
-
-        # Fall back to title if not found by DOI
-        if not existing and paper.title:
-            existing = self.storage.find_paper_by_title(paper.title)
+        # Use fuzzy duplicate detection
+        existing = self.storage.find_duplicate_paper(paper)
 
         if existing:
             existing.observation_count += 1
+            # Merge any missing information from the new paper
+            if not existing.doi and paper.doi:
+                existing.doi = paper.doi
+            if not existing.abstract and paper.abstract:
+                existing.abstract = paper.abstract
+            if not existing.year and paper.year:
+                existing.year = paper.year
+            if not existing.citation_count and paper.citation_count:
+                existing.citation_count = paper.citation_count
+
             self.storage.save_paper(existing)
-            logger.debug(f"Incremented observation count for '{existing.title}' to {existing.observation_count}")
+            logger.debug(f"Merged duplicate: '{paper.title}' -> '{existing.title}' (obs: {existing.observation_count})")
+            return existing
+
+        return None
 
     def _mark_seen(self, paper: Paper, seen_identifiers: Set[str]) -> None:
         """Mark a paper as seen."""
