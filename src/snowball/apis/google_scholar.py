@@ -15,19 +15,29 @@ class GoogleScholarClient:
     appropriate rate limiting to avoid being blocked.
     """
 
-    def __init__(self, rate_limit_delay: float = 2.0):
+    def __init__(
+        self,
+        rate_limit_delay: float = 2.0,
+        proxy: Optional[str] = None,
+        use_free_proxy: bool = False,
+    ):
         """Initialize Google Scholar client.
 
         Args:
             rate_limit_delay: Delay between requests in seconds.
                               Default is 2 seconds to avoid rate limiting.
+            proxy: HTTP/HTTPS proxy URL (e.g., "http://user:pass@host:port")
+            use_free_proxy: Use free rotating proxies via free-proxy library
         """
         self.rate_limit_delay = rate_limit_delay
+        self.proxy = proxy
+        self.use_free_proxy = use_free_proxy
         self._scholarly = None
         self._last_request_time = 0
+        self._proxy_configured = False
 
     def _get_scholarly(self):
-        """Lazy load scholarly library."""
+        """Lazy load scholarly library and configure proxy if needed."""
         if self._scholarly is None:
             try:
                 from scholarly import scholarly
@@ -35,7 +45,44 @@ class GoogleScholarClient:
             except ImportError:
                 logger.error("scholarly library not installed. Run: pip install scholarly")
                 raise ImportError("scholarly library required for Google Scholar support")
+
+        # Configure proxy on first use
+        if not self._proxy_configured:
+            self._configure_proxy()
+            self._proxy_configured = True
+
         return self._scholarly
+
+    def _configure_proxy(self):
+        """Configure proxy for scholarly requests."""
+        if not self.proxy and not self.use_free_proxy:
+            return
+
+        try:
+            from scholarly import ProxyGenerator
+            pg = ProxyGenerator()
+
+            if self.proxy:
+                # Use specified proxy
+                success = pg.SingleProxy(http=self.proxy, https=self.proxy)
+                if success:
+                    self._scholarly.use_proxy(pg)
+                    logger.info(f"Google Scholar: Using proxy {self.proxy[:30]}...")
+                else:
+                    logger.warning("Failed to configure proxy, continuing without")
+            elif self.use_free_proxy:
+                # Use free rotating proxies
+                success = pg.FreeProxies()
+                if success:
+                    self._scholarly.use_proxy(pg)
+                    logger.info("Google Scholar: Using free rotating proxies")
+                else:
+                    logger.warning("Failed to configure free proxy, continuing without")
+
+        except ImportError:
+            logger.warning("ProxyGenerator not available, continuing without proxy")
+        except Exception as e:
+            logger.warning(f"Proxy configuration failed: {e}")
 
     def _rate_limit(self):
         """Apply rate limiting between requests."""

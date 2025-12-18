@@ -22,7 +22,9 @@ class APIAggregator:
         self,
         s2_api_key: Optional[str] = None,
         email: Optional[str] = None,
-        use_apis: Optional[List[str]] = None
+        use_apis: Optional[List[str]] = None,
+        scholar_proxy: Optional[str] = None,
+        scholar_free_proxy: bool = False,
     ):
         """Initialize API aggregator.
 
@@ -30,9 +32,13 @@ class APIAggregator:
             s2_api_key: Semantic Scholar API key
             email: Email for CrossRef and OpenAlex polite pools
             use_apis: List of APIs to use (default: all)
+            scholar_proxy: Proxy URL for Google Scholar (e.g., "http://host:port")
+            scholar_free_proxy: Use free rotating proxies for Google Scholar
         """
         if use_apis is None:
-            use_apis = ["semantic_scholar", "crossref", "openalex", "arxiv", "google_scholar"]
+            # Note: google_scholar excluded by default due to aggressive rate limiting/IP bans
+            # Use --use-scholar flag to explicitly enable it
+            use_apis = ["semantic_scholar", "crossref", "openalex", "arxiv"]
 
         self.clients = {}
 
@@ -54,7 +60,10 @@ class APIAggregator:
             logger.info("Initialized arXiv client")
 
         if "google_scholar" in use_apis:
-            self.clients["google_scholar"] = GoogleScholarClient()
+            self.clients["google_scholar"] = GoogleScholarClient(
+                proxy=scholar_proxy,
+                use_free_proxy=scholar_free_proxy,
+            )
             logger.info("Initialized Google Scholar client")
 
     def search_by_doi(self, doi: str) -> Optional[Paper]:

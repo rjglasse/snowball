@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_api_config(args) -> tuple:
+def get_api_config(args) -> dict:
     """Get API configuration from args or environment variables.
 
     Environment variables:
@@ -42,11 +42,27 @@ def get_api_config(args) -> tuple:
         SNOWBALL_EMAIL: Email for API polite pools
 
     Returns:
-        Tuple of (s2_api_key, email)
+        Dict with keys: s2_api_key, email, use_apis, scholar_proxy, scholar_free_proxy
     """
     s2_api_key = getattr(args, "s2_api_key", None) or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
     email = getattr(args, "email", None) or os.environ.get("SNOWBALL_EMAIL")
-    return s2_api_key, email
+
+    # Build API list - google_scholar only if explicitly enabled
+    use_apis = ["semantic_scholar", "crossref", "openalex", "arxiv"]
+    if getattr(args, "use_scholar", False):
+        use_apis.append("google_scholar")
+
+    # Proxy settings for Google Scholar
+    scholar_proxy = getattr(args, "scholar_proxy", None)
+    scholar_free_proxy = getattr(args, "scholar_free_proxy", False)
+
+    return {
+        "s2_api_key": s2_api_key,
+        "email": email,
+        "use_apis": use_apis,
+        "scholar_proxy": scholar_proxy,
+        "scholar_free_proxy": scholar_free_proxy,
+    }
 
 
 def init_project(args) -> None:
@@ -98,8 +114,8 @@ def add_seed(args) -> None:
         sys.exit(1)
 
     # Set up API and engine
-    s2_api_key, email = get_api_config(args)
-    api = APIAggregator(s2_api_key=s2_api_key, email=email)
+    api_config = get_api_config(args)
+    api = APIAggregator(**api_config)
     pdf_parser = PDFParser(use_grobid=not args.no_grobid)
     engine = SnowballEngine(storage, api, pdf_parser)
 
@@ -156,8 +172,8 @@ def run_snowball(args) -> None:
         sys.exit(1)
 
     # Set up API and engine
-    s2_api_key, email = get_api_config(args)
-    api = APIAggregator(s2_api_key=s2_api_key, email=email)
+    api_config = get_api_config(args)
+    api = APIAggregator(**api_config)
     engine = SnowballEngine(storage, api)
 
     # Check if we can start (unless --force is used)
@@ -223,8 +239,8 @@ def review(args) -> None:
         sys.exit(1)
 
     # Set up API and engine
-    s2_api_key, email = get_api_config(args)
-    api = APIAggregator(s2_api_key=s2_api_key, email=email)
+    api_config = get_api_config(args)
+    api = APIAggregator(**api_config)
     engine = SnowballEngine(storage, api)
 
     # Redirect logging to file to avoid corrupting TUI display
@@ -797,6 +813,18 @@ def main():
     seed_parser.add_argument(
         "--no-grobid", action="store_true", help="Don't use GROBID for PDF parsing"
     )
+    seed_parser.add_argument(
+        "--use-scholar", action="store_true",
+        help="Enable Google Scholar API (disabled by default due to rate limiting)"
+    )
+    seed_parser.add_argument(
+        "--scholar-proxy",
+        help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"
+    )
+    seed_parser.add_argument(
+        "--scholar-free-proxy", action="store_true",
+        help="Use free rotating proxies for Google Scholar (requires free-proxy package)"
+    )
 
     # Snowball command
     snowball_parser = subparsers.add_parser("snowball", help="Run snowballing iterations")
@@ -815,12 +843,36 @@ def main():
         action="store_true",
         help="Force iteration even if there are unreviewed papers (not recommended)",
     )
+    snowball_parser.add_argument(
+        "--use-scholar", action="store_true",
+        help="Enable Google Scholar API (disabled by default due to rate limiting)"
+    )
+    snowball_parser.add_argument(
+        "--scholar-proxy",
+        help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"
+    )
+    snowball_parser.add_argument(
+        "--scholar-free-proxy", action="store_true",
+        help="Use free rotating proxies for Google Scholar (requires free-proxy package)"
+    )
 
     # Review command
     review_parser = subparsers.add_parser("review", help="Launch interactive review interface")
     review_parser.add_argument("directory", help="Project directory")
     review_parser.add_argument("--s2-api-key", help="Semantic Scholar API key")
     review_parser.add_argument("--email", help="Email for API polite pools")
+    review_parser.add_argument(
+        "--use-scholar", action="store_true",
+        help="Enable Google Scholar API (disabled by default due to rate limiting)"
+    )
+    review_parser.add_argument(
+        "--scholar-proxy",
+        help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"
+    )
+    review_parser.add_argument(
+        "--scholar-free-proxy", action="store_true",
+        help="Use free rotating proxies for Google Scholar (requires free-proxy package)"
+    )
 
     # Export command
     export_parser = subparsers.add_parser("export", help="Export results")
