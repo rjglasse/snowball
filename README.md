@@ -111,9 +111,21 @@ snowball export my-slr-project --format bibtex --included-only
 # Export all papers to CSV with full metadata
 snowball export my-slr-project --format csv
 
-# Export both formats
+# Export citation graph as TikZ/LaTeX code
+snowball export my-slr-project --format tikz --included-only
+
+# Export citation graph as standalone LaTeX document
+snowball export my-slr-project --format tikz --included-only --standalone
+
+# Export all formats (BibTeX, CSV, and TikZ)
 snowball export my-slr-project --format all
 ```
+
+**TikZ Export:**
+- Generates publication-ready LaTeX/TikZ code for citation network visualization
+- Use `--standalone` to create a complete LaTeX document (compile with `pdflatex`)
+- Without `--standalone`, generates TikZ code for embedding in your own LaTeX document
+- Papers are positioned by iteration (left to right) and sorted by citation count
 
 ### 6. Update Citation Counts (Optional)
 

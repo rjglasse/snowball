@@ -16,6 +16,7 @@ from .snowballing import SnowballEngine
 from .tui.app import run_tui
 from .exporters.bibtex import BibTeXExporter
 from .exporters.csv_exporter import CSVExporter
+from .exporters.tikz import TikZExporter
 from .paper_utils import (
     get_status_value,
     filter_papers,
@@ -43,8 +44,8 @@ def get_api_config(args) -> tuple:
     Returns:
         Tuple of (s2_api_key, email)
     """
-    s2_api_key = getattr(args, 's2_api_key', None) or os.environ.get('SEMANTIC_SCHOLAR_API_KEY')
-    email = getattr(args, 'email', None) or os.environ.get('SNOWBALL_EMAIL')
+    s2_api_key = getattr(args, "s2_api_key", None) or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
+    email = getattr(args, "email", None) or os.environ.get("SNOWBALL_EMAIL")
     return s2_api_key, email
 
 
@@ -107,6 +108,7 @@ def add_seed(args) -> None:
 
     if args.pdf:
         import shutil
+
         pdfs_dir = project_dir / "pdfs"
         pdfs_dir.mkdir(exist_ok=True)
 
@@ -159,7 +161,7 @@ def run_snowball(args) -> None:
     engine = SnowballEngine(storage, api)
 
     # Check if we can start (unless --force is used)
-    force = getattr(args, 'force', False)
+    force = getattr(args, "force", False)
     if not force:
         can_start, reason = engine.can_start_iteration(project)
         if not can_start:
@@ -234,9 +236,9 @@ def review(args) -> None:
         root_logger.removeHandler(handler)
 
     file_handler = logging.FileHandler(log_file)
-    file_handler.setFormatter(logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    ))
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
     root_logger.addHandler(file_handler)
 
     # Launch TUI
@@ -295,6 +297,26 @@ def export_results(args) -> None:
             csv_exporter.export(papers, csv_path, only_included=False, include_all_fields=True)
 
         logger.info(f"Exported CSV to {csv_path}")
+
+    # Export TikZ
+    if args.format in ["tikz", "all"]:
+        tikz_exporter = TikZExporter()
+
+        if args.included_only:
+            tikz_content = tikz_exporter.export(
+                papers, only_included=True, standalone=args.standalone
+            )
+            tikz_path = output_dir / "citation_graph_included.tex"
+        else:
+            tikz_content = tikz_exporter.export(
+                papers, only_included=False, standalone=args.standalone
+            )
+            tikz_path = output_dir / "citation_graph_all.tex"
+
+        with open(tikz_path, "w") as f:
+            f.write(tikz_content)
+
+        logger.info(f"Exported TikZ to {tikz_path}")
 
 
 def list_papers(args) -> None:
@@ -564,6 +586,7 @@ def update_citations(args) -> None:
 
     # Set up engine (no API needed for citation update)
     from .apis.aggregator import APIAggregator
+
     api = APIAggregator()
     engine = SnowballEngine(storage, api)
 
@@ -579,10 +602,7 @@ def update_citations(args) -> None:
         logger.info(f"Updating {len(papers)} papers with status '{args.status}'")
 
     # Run update
-    stats = engine.update_citations_from_google_scholar(
-        papers=papers,
-        rate_limit_delay=args.delay
-    )
+    stats = engine.update_citations_from_google_scholar(papers=papers, rate_limit_delay=args.delay)
 
     logger.info(f"\nUpdate complete:")
     logger.info(f"  Total papers: {stats['total']}")
@@ -601,7 +621,7 @@ def _titles_match(title1: str, title2: str, threshold: float = 0.8) -> bool:
     words2 = set(title2.lower().split())
 
     # Remove common short words
-    stopwords = {'a', 'an', 'the', 'of', 'in', 'on', 'for', 'to', 'and', 'or', 'with'}
+    stopwords = {"a", "an", "the", "of", "in", "on", "for", "to", "and", "or", "with"}
     words1 = words1 - stopwords
     words2 = words2 - stopwords
 
@@ -634,7 +654,7 @@ def _find_paper_by_title_fuzzy(papers: list, title: str, threshold: float = 0.8)
         # Calculate similarity
         words1 = set(title.lower().split())
         words2 = set(paper.title.lower().split())
-        stopwords = {'a', 'an', 'the', 'of', 'in', 'on', 'for', 'to', 'and', 'or', 'with'}
+        stopwords = {"a", "an", "the", "of", "in", "on", "for", "to", "and", "or", "with"}
         words1 = words1 - stopwords
         words2 = words2 - stopwords
 
@@ -806,11 +826,14 @@ def main():
     export_parser = subparsers.add_parser("export", help="Export results")
     export_parser.add_argument("directory", help="Project directory")
     export_parser.add_argument(
-        "--format", choices=["bibtex", "csv", "all"], default="all", help="Export format"
+        "--format", choices=["bibtex", "csv", "tikz", "all"], default="all", help="Export format"
     )
     export_parser.add_argument("--output", help="Output directory")
     export_parser.add_argument(
         "--included-only", action="store_true", help="Only export included papers"
+    )
+    export_parser.add_argument(
+        "--standalone", action="store_true", help="Generate standalone LaTeX document (for TikZ)"
     )
 
     # List command (non-interactive)
