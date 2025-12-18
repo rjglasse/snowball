@@ -44,6 +44,7 @@ venv.bak/
 *.bib
 *.csv
 *.xlsx
+demo_viz/
 
 # SLR projects (don't commit actual review data)
 *-slr/
