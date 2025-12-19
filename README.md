@@ -8,7 +8,7 @@ A terminal-based tool for conducting Systematic Literature Reviews (SLR) using t
 
 - Start by adding seed papers (via PDF or DOI)
 - Review seed papers for inclusion (just in case)
-- Snowball backwards, forwards or both (optionally setting time period)
+- Snowball backwards (via references), forwards (via citations) or both (optionally setting time period)
 - Review list of found papers for inclusion or exclusion
   - Simple keyboard shortcut interaction
   - Filter by keyword or review status 
@@ -16,8 +16,6 @@ A terminal-based tool for conducting Systematic Literature Reviews (SLR) using t
   - Open DOI (if available) in web browser for more info and to access PDF
   - Repair any errors in metadata
 - Once there are no more "Pending" papers, add PDFs to the project's PDF folder and snowball again.
-
-
 
 ## Quick Start
 
