@@ -303,7 +303,7 @@ If you use Snowball in your research, please cite:
   title = {Snowball: A Tool for Systematic Literature Reviews},
   author = {Richard Glassey and Daniel Bosk},
   year = {2025},
-  url = {https://github.com/yrjglasse/snowball}
+  url = {https://github.com/rjglasse/snowball}
 }
 ```
 
