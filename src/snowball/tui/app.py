@@ -1232,12 +1232,18 @@ class SnowballApp(App):
         csv_path = self.project_dir / "export_all.csv"
         csv_exporter.export(papers, csv_path, only_included=False)
 
-        # Export TikZ
+        # Export TikZ (both embeddable and standalone versions)
         tikz_exporter = TikZExporter()
+
         tikz_content = tikz_exporter.export(papers, only_included=True, standalone=False)
         tikz_path = self.project_dir / "citation_graph_included.tex"
         with open(tikz_path, "w") as f:
             f.write(tikz_content)
+
+        tikz_standalone = tikz_exporter.export(papers, only_included=True, standalone=True)
+        tikz_standalone_path = self.project_dir / "citation_graph_standalone.tex"
+        with open(tikz_standalone_path, "w") as f:
+            f.write(tikz_standalone)
 
         # Export PNG graph
         viz_dir = self.project_dir / "viz"
