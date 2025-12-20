@@ -47,7 +47,7 @@ class TikZExporter:
 
         # Calculate positions
         pos = {}
-        x_spacing = 6.0  # Horizontal spacing between iterations (in cm)
+        x_spacing = 10.0  # Horizontal spacing between iterations (in cm)
         y_spacing = 2.5  # Vertical spacing between nodes (in cm)
 
         for iter_num in sorted(iterations.keys()):
@@ -108,7 +108,10 @@ class TikZExporter:
         lines.append(r"    ->,")
         lines.append(r"    >=stealth,")
         lines.append(r"    thick,")
-        lines.append(r"    color=black!60")
+        lines.append(r"    color=black!60,")
+        lines.append(r"    out=0,")
+        lines.append(r"    in=180,")
+        lines.append(r"    looseness=1.2")
         lines.append(r"  }")
         lines.append(r"]")
         lines.append("")
@@ -146,11 +149,11 @@ class TikZExporter:
 
         lines.append("")
 
-        # Add edges
+        # Add edges (from east anchor to west anchor with S-curves)
         for source_id, target_id in edges:
             source_node = self._sanitize_id(source_id)
             target_node = self._sanitize_id(target_id)
-            lines.append(f"\\draw[citation] ({source_node}) -- ({target_node});")
+            lines.append(f"\\draw[citation] ({source_node}.east) to ({target_node}.west);")
 
         lines.append("")
         lines.append(r"\end{tikzpicture}")

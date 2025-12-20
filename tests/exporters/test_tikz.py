@@ -183,8 +183,8 @@ class TestTikZExporter:
 
         # Check that nodes are positioned at different x coordinates
         assert "at (0.0cm," in result  # iteration 0
-        assert "at (6.0cm," in result  # iteration 1
-        assert "at (12.0cm," in result  # iteration 2
+        assert "at (10.0cm," in result  # iteration 1
+        assert "at (20.0cm," in result  # iteration 2
 
     def test_escape_latex_special_chars(self, exporter):
         """Test that special LaTeX characters are escaped."""
