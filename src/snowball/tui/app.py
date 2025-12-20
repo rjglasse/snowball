@@ -28,6 +28,7 @@ from ..storage.json_storage import JSONStorage
 from ..snowballing import SnowballEngine
 from ..exporters.bibtex import BibTeXExporter
 from ..exporters.csv_exporter import CSVExporter
+from ..exporters.tikz import TikZExporter
 from ..parsers.pdf_parser import PDFParser
 from ..paper_utils import (
     get_status_value,
@@ -1213,7 +1214,7 @@ class SnowballApp(App):
             self._log_event(f"[#a371f7]Snowball:[/#a371f7] iteration {self.project.current_iteration}, no new papers")
 
     def action_export(self) -> None:
-        """Export papers to BibTeX, CSV, and PNG graph."""
+        """Export papers to BibTeX, CSV, TikZ, and PNG graph."""
         from ..visualization import generate_citation_graph
 
         papers = self.storage.load_all_papers()
@@ -1231,6 +1232,13 @@ class SnowballApp(App):
         csv_path = self.project_dir / "export_all.csv"
         csv_exporter.export(papers, csv_path, only_included=False)
 
+        # Export TikZ
+        tikz_exporter = TikZExporter()
+        tikz_content = tikz_exporter.export(papers, only_included=True, standalone=False)
+        tikz_path = self.project_dir / "citation_graph_included.tex"
+        with open(tikz_path, "w") as f:
+            f.write(tikz_content)
+
         # Export PNG graph
         viz_dir = self.project_dir / "viz"
         graph_path = generate_citation_graph(
@@ -1240,11 +1248,11 @@ class SnowballApp(App):
         )
 
         if graph_path:
-            self.notify("Exported BibTeX, CSV, and graph", title="Export complete", severity="information")
-            self._log_event(f"[#d29922]Exported:[/#d29922] {included_count} included → BibTeX, CSV, PNG")
+            self.notify("Exported BibTeX, CSV, TikZ, and graph", title="Export complete", severity="information")
+            self._log_event(f"[#d29922]Exported:[/#d29922] {included_count} included → BibTeX, CSV, TikZ, PNG")
         else:
-            self.notify("Exported BibTeX and CSV", title="Export complete", severity="information")
-            self._log_event(f"[#d29922]Exported:[/#d29922] {included_count} included → BibTeX, {len(papers)} total → CSV")
+            self.notify("Exported BibTeX, CSV, and TikZ", title="Export complete", severity="information")
+            self._log_event(f"[#d29922]Exported:[/#d29922] {included_count} included → BibTeX, CSV, TikZ")
 
     def action_graph(self) -> None:
         """Generate citation network graph visualization."""
