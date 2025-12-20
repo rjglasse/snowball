@@ -4,8 +4,11 @@ This module contains functions that are shared between the CLI and TUI interface
 to avoid code duplication.
 """
 
+import logging
 from typing import Dict, List, Optional, Union
 from .models import Paper, PaperStatus, PaperSource
+
+logger = logging.getLogger(__name__)
 
 
 # Status ordering for sorting (pending first for review workflow)
@@ -313,21 +316,30 @@ def authors_similarity(authors1: list, authors2: list) -> float:
 def papers_are_duplicates(
     paper1: Paper,
     paper2: Paper,
-    title_threshold: float = 0.7,
-    author_threshold: float = 0.3
+    title_threshold: float = 0.85,
+    author_threshold: float = 0.3,
+    year_tolerance: int = 1
 ) -> bool:
-    """Check if two papers are likely duplicates.
+    """Check if two papers are likely duplicates (conservative approach).
 
     Papers are considered duplicates if:
     - They have the same DOI (exact match), OR
-    - Their titles are similar (>= title_threshold) AND
-      their authors are similar (>= author_threshold)
+    - They have the same arXiv ID (exact match), OR
+    - ALL of the following are true:
+      - Their titles are similar (>= title_threshold, default 0.85)
+      - Their years match (within year_tolerance, default ±1) OR one/both missing
+      - Their authors are similar (>= author_threshold) OR one/both missing
+
+    This conservative approach prioritizes forensic accuracy over convenience.
+    False negatives (missing a duplicate) are preferable to false positives
+    (wrongly merging distinct papers).
 
     Args:
         paper1: First paper
         paper2: Second paper
-        title_threshold: Minimum title similarity (default 0.7)
+        title_threshold: Minimum title similarity (default 0.85 - stricter than before)
         author_threshold: Minimum author similarity (default 0.3)
+        year_tolerance: Maximum year difference allowed (default 1 for preprint/published)
 
     Returns:
         True if papers are likely duplicates
@@ -335,23 +347,102 @@ def papers_are_duplicates(
     # Exact DOI match is definitive
     if paper1.doi and paper2.doi:
         if paper1.doi.lower() == paper2.doi.lower():
+            _log_duplicate_decision(paper1, paper2, "DOI match", 1.0, True)
             return True
+        else:
+            # Different DOIs = definitively NOT the same paper (forensic safety)
+            _log_duplicate_decision(
+                paper1, paper2,
+                f"Different DOIs ({paper1.doi} vs {paper2.doi})",
+                0.0, False
+            )
+            return False
 
-    # Check title similarity
+    # Exact arXiv ID match is definitive
+    if paper1.arxiv_id and paper2.arxiv_id:
+        # Normalize arXiv IDs (remove version suffix like "v1", "v2")
+        arxiv1 = paper1.arxiv_id.lower().split('v')[0].rstrip('.')
+        arxiv2 = paper2.arxiv_id.lower().split('v')[0].rstrip('.')
+        if arxiv1 == arxiv2:
+            _log_duplicate_decision(paper1, paper2, "arXiv ID match", 1.0, True)
+            return True
+        else:
+            # Different arXiv IDs = definitively NOT the same paper (forensic safety)
+            _log_duplicate_decision(
+                paper1, paper2,
+                f"Different arXiv IDs ({paper1.arxiv_id} vs {paper2.arxiv_id})",
+                0.0, False
+            )
+            return False
+
+    # Check title similarity (required for fuzzy matching)
     if not paper1.title or not paper2.title:
         return False
 
     title_sim = title_similarity(paper1.title, paper2.title)
     if title_sim < title_threshold:
+        # Only log near-misses for debugging
+        if title_sim >= 0.6:
+            _log_duplicate_decision(
+                paper1, paper2,
+                f"Title below threshold ({title_sim:.2f} < {title_threshold})",
+                title_sim, False
+            )
         return False
 
-    # If titles match well, check authors (if available)
-    # If no authors on either side, rely on title match alone
-    if not paper1.authors or not paper2.authors:
-        return title_sim >= title_threshold
+    # Check year compatibility (if both have years)
+    if paper1.year and paper2.year:
+        year_diff = abs(paper1.year - paper2.year)
+        if year_diff > year_tolerance:
+            _log_duplicate_decision(
+                paper1, paper2,
+                f"Year mismatch ({paper1.year} vs {paper2.year}, diff={year_diff})",
+                title_sim, False
+            )
+            return False
 
-    author_sim = authors_similarity(paper1.authors, paper2.authors)
-    return author_sim >= author_threshold
+    # Check author similarity (if both have authors)
+    if paper1.authors and paper2.authors:
+        author_sim = authors_similarity(paper1.authors, paper2.authors)
+        if author_sim < author_threshold:
+            _log_duplicate_decision(
+                paper1, paper2,
+                f"Authors below threshold ({author_sim:.2f} < {author_threshold})",
+                title_sim, False
+            )
+            return False
+
+    # All checks passed - this is a duplicate
+    _log_duplicate_decision(
+        paper1, paper2,
+        f"Fuzzy match (title={title_sim:.2f})",
+        title_sim, True
+    )
+    return True
+
+
+def _log_duplicate_decision(
+    paper1: Paper,
+    paper2: Paper,
+    reason: str,
+    similarity: float,
+    is_duplicate: bool
+) -> None:
+    """Log a duplicate detection decision for forensic auditing.
+
+    Args:
+        paper1: First paper
+        paper2: Second paper
+        reason: Explanation of the decision
+        similarity: Similarity score
+        is_duplicate: Whether papers were marked as duplicates
+    """
+    decision = "DUPLICATE" if is_duplicate else "DISTINCT"
+    logger.debug(
+        f"Dedup {decision}: {reason}\n"
+        f"  Paper 1: [{paper1.year or '?'}] {paper1.title[:60]}...\n"
+        f"  Paper 2: [{paper2.year or '?'}] {paper2.title[:60]}..."
+    )
 
 
 def paper_to_dict(paper: Paper, include_abstract: bool = False) -> dict:

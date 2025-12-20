@@ -13,6 +13,9 @@ from snowball.paper_utils import (
     paper_to_dict,
     format_paper_text,
     format_paper_rich,
+    papers_are_duplicates,
+    title_similarity,
+    authors_similarity,
     STATUS_ORDER,
     SOURCE_ORDER,
     MAX_AUTHORS_DISPLAY,
@@ -569,3 +572,311 @@ class TestFormatPaperRich:
             paper = Paper(id="test", title="Test", status=status, source=PaperSource.SEED)
             result = format_paper_rich(paper)
             assert status.value in result
+
+
+class TestPapersAreDuplicates:
+    """Tests for papers_are_duplicates function - forensic accuracy is critical."""
+
+    def _make_paper(
+        self,
+        title: str = "Test Paper",
+        doi: str = None,
+        arxiv_id: str = None,
+        year: int = None,
+        authors: list = None,
+    ) -> Paper:
+        """Helper to create test papers."""
+        return Paper(
+            id="test-id",
+            title=title,
+            doi=doi,
+            arxiv_id=arxiv_id,
+            year=year,
+            authors=[Author(name=a) for a in authors] if authors else [],
+            status=PaperStatus.PENDING,
+            source=PaperSource.SEED,
+        )
+
+    # === DOI MATCHING ===
+
+    def test_exact_doi_match_is_duplicate(self):
+        """Exact DOI match should always be a duplicate."""
+        p1 = self._make_paper(title="Paper One", doi="10.1234/abc")
+        p2 = self._make_paper(title="Completely Different Title", doi="10.1234/abc")
+        assert papers_are_duplicates(p1, p2) is True
+
+    def test_doi_match_case_insensitive(self):
+        """DOI matching should be case-insensitive."""
+        p1 = self._make_paper(doi="10.1234/ABC")
+        p2 = self._make_paper(doi="10.1234/abc")
+        assert papers_are_duplicates(p1, p2) is True
+
+    def test_different_dois_not_duplicate(self):
+        """Different DOIs should not match even with similar titles."""
+        p1 = self._make_paper(title="Machine Learning", doi="10.1234/abc")
+        p2 = self._make_paper(title="Machine Learning", doi="10.1234/xyz")
+        assert papers_are_duplicates(p1, p2) is False
+
+    # === ARXIV ID MATCHING ===
+
+    def test_exact_arxiv_id_match_is_duplicate(self):
+        """Exact arXiv ID match should always be a duplicate."""
+        p1 = self._make_paper(title="Paper One", arxiv_id="2301.12345")
+        p2 = self._make_paper(title="Different Title", arxiv_id="2301.12345")
+        assert papers_are_duplicates(p1, p2) is True
+
+    def test_arxiv_id_ignores_version(self):
+        """arXiv ID matching should ignore version suffix (v1, v2, etc.)."""
+        p1 = self._make_paper(arxiv_id="2301.12345v1")
+        p2 = self._make_paper(arxiv_id="2301.12345v2")
+        assert papers_are_duplicates(p1, p2) is True
+
+    def test_arxiv_id_case_insensitive(self):
+        """arXiv ID matching should be case-insensitive."""
+        p1 = self._make_paper(arxiv_id="2301.12345V1")
+        p2 = self._make_paper(arxiv_id="2301.12345v1")
+        assert papers_are_duplicates(p1, p2) is True
+
+    def test_different_arxiv_ids_not_duplicate(self):
+        """Different arXiv IDs should not match."""
+        p1 = self._make_paper(title="Same Title", arxiv_id="2301.12345")
+        p2 = self._make_paper(title="Same Title", arxiv_id="2301.99999")
+        assert papers_are_duplicates(p1, p2) is False
+
+    # === YEAR MATCHING ===
+
+    def test_same_year_allows_fuzzy_match(self):
+        """Papers from same year with similar titles should be duplicates."""
+        p1 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            year=2023,
+            authors=["John Smith"],
+        )
+        p2 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            year=2023,
+            authors=["John Smith"],
+        )
+        assert papers_are_duplicates(p1, p2) is True
+
+    def test_one_year_difference_allowed(self):
+        """Papers within 1 year should allow fuzzy matching (preprint/published)."""
+        p1 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            year=2022,
+            authors=["John Smith"],
+        )
+        p2 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            year=2023,
+            authors=["John Smith"],
+        )
+        assert papers_are_duplicates(p1, p2) is True
+
+    def test_two_year_difference_not_duplicate(self):
+        """Papers with >1 year difference should NOT be duplicates (forensic safety)."""
+        p1 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            year=2020,
+            authors=["John Smith"],
+        )
+        p2 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            year=2023,
+            authors=["John Smith"],
+        )
+        assert papers_are_duplicates(p1, p2) is False
+
+    def test_missing_year_allows_match(self):
+        """If one or both papers lack year, skip year check."""
+        p1 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            year=None,
+            authors=["John Smith"],
+        )
+        p2 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            year=2023,
+            authors=["John Smith"],
+        )
+        assert papers_are_duplicates(p1, p2) is True
+
+    # === TITLE THRESHOLD ===
+
+    def test_high_title_similarity_is_duplicate(self):
+        """Titles with >0.85 similarity should match."""
+        # 5/6 words shared = 0.833, below threshold. Use identical titles instead.
+        p1 = self._make_paper(title="Deep Learning for Natural Language Processing")
+        p2 = self._make_paper(title="Deep Learning for Natural Language Processing")
+        assert papers_are_duplicates(p1, p2) is True
+
+    def test_near_threshold_title_not_duplicate(self):
+        """Titles just below 0.85 threshold should NOT match (forensic safety)."""
+        p1 = self._make_paper(title="Deep Learning for Natural Language Processing")
+        p2 = self._make_paper(title="Deep Learning for Natural Language Processing Tasks")
+        # 5/6 words = 0.833, below 0.85 threshold
+        assert papers_are_duplicates(p1, p2) is False
+
+    def test_moderate_title_similarity_not_duplicate(self):
+        """Titles with <0.85 similarity should NOT match (stricter threshold)."""
+        p1 = self._make_paper(title="Machine Learning for Image Recognition")
+        p2 = self._make_paper(title="Deep Learning for Natural Language Processing")
+        # Very different topics, should be <0.85
+        assert papers_are_duplicates(p1, p2) is False
+
+    def test_word_order_matters_somewhat(self):
+        """Word order doesn't affect Jaccard, but different words do."""
+        # Same words, different order - still 100% Jaccard
+        p1 = self._make_paper(title="Machine Learning Applications")
+        p2 = self._make_paper(title="Applications Machine Learning")
+        assert papers_are_duplicates(p1, p2) is True
+
+    # === AUTHOR MATCHING ===
+
+    def test_same_authors_match(self):
+        """Papers with same authors should match."""
+        p1 = self._make_paper(
+            title="Deep Learning Methods",
+            authors=["John Smith", "Jane Doe"],
+        )
+        p2 = self._make_paper(
+            title="Deep Learning Methods",
+            authors=["John Smith", "Jane Doe"],
+        )
+        assert papers_are_duplicates(p1, p2) is True
+
+    def test_different_authors_not_duplicate(self):
+        """Papers with different authors should NOT match (even with same title)."""
+        p1 = self._make_paper(
+            title="Deep Learning Methods for Computer Vision",
+            year=2023,
+            authors=["Alice Johnson", "Bob Wilson"],
+        )
+        p2 = self._make_paper(
+            title="Deep Learning Methods for Computer Vision",
+            year=2023,
+            authors=["Charlie Brown", "Diana Prince"],
+        )
+        # Same title, same year, but completely different authors
+        assert papers_are_duplicates(p1, p2) is False
+
+    def test_partial_author_overlap_matches(self):
+        """Papers with partial author overlap should match (threshold 0.3)."""
+        p1 = self._make_paper(
+            title="Deep Learning Methods",
+            authors=["John Smith", "Jane Doe", "Bob Wilson"],
+        )
+        p2 = self._make_paper(
+            title="Deep Learning Methods",
+            authors=["John Smith", "Alice Brown"],
+        )
+        # 1 shared author out of 4 unique = 0.25, below 0.3 threshold
+        # But let's test with better overlap
+        p3 = self._make_paper(
+            title="Deep Learning Methods",
+            authors=["John Smith", "Jane Doe"],
+        )
+        assert papers_are_duplicates(p1, p3) is True
+
+    def test_missing_authors_allows_match(self):
+        """If one or both papers lack authors, skip author check."""
+        p1 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            authors=[],
+        )
+        p2 = self._make_paper(
+            title="Deep Learning for Natural Language Processing",
+            authors=["John Smith"],
+        )
+        assert papers_are_duplicates(p1, p2) is True
+
+    # === EDGE CASES ===
+
+    def test_empty_title_not_duplicate(self):
+        """Papers with empty titles should never match."""
+        p1 = self._make_paper(title="")
+        p2 = self._make_paper(title="Some Title")
+        assert papers_are_duplicates(p1, p2) is False
+
+    def test_identical_papers_are_duplicates(self):
+        """Identical papers should always be duplicates."""
+        p1 = self._make_paper(
+            title="Test Paper",
+            doi="10.1234/test",
+            year=2023,
+            authors=["Author One"],
+        )
+        p2 = self._make_paper(
+            title="Test Paper",
+            doi="10.1234/test",
+            year=2023,
+            authors=["Author One"],
+        )
+        assert papers_are_duplicates(p1, p2) is True
+
+
+class TestTitleSimilarity:
+    """Tests for title_similarity function."""
+
+    def test_identical_titles(self):
+        """Identical titles should have similarity 1.0."""
+        assert title_similarity("Machine Learning", "Machine Learning") == 1.0
+
+    def test_completely_different_titles(self):
+        """Completely different titles should have similarity 0.0."""
+        assert title_similarity("Alpha Beta Gamma", "Delta Epsilon Zeta") == 0.0
+
+    def test_partial_overlap(self):
+        """Titles with partial word overlap."""
+        # 2 words shared (deep, learning) out of 5 unique
+        sim = title_similarity("Deep Learning Methods", "Deep Learning Applications")
+        assert 0.4 <= sim <= 0.7
+
+    def test_stopwords_ignored(self):
+        """Common stopwords should be ignored."""
+        sim = title_similarity(
+            "The Study of Machine Learning",
+            "A Study on Machine Learning"
+        )
+        # "the", "of", "a", "on" are stopwords
+        assert sim >= 0.8
+
+    def test_case_insensitive(self):
+        """Title similarity should be case-insensitive."""
+        assert title_similarity("MACHINE LEARNING", "machine learning") == 1.0
+
+
+class TestAuthorsSimilarity:
+    """Tests for authors_similarity function."""
+
+    def test_identical_authors(self):
+        """Identical author lists should have similarity 1.0."""
+        a1 = [Author(name="John Smith"), Author(name="Jane Doe")]
+        a2 = [Author(name="John Smith"), Author(name="Jane Doe")]
+        assert authors_similarity(a1, a2) == 1.0
+
+    def test_no_overlap(self):
+        """Authors with no overlap should have similarity 0.0."""
+        a1 = [Author(name="John Smith")]
+        a2 = [Author(name="Jane Doe")]
+        assert authors_similarity(a1, a2) == 0.0
+
+    def test_partial_overlap(self):
+        """Authors with partial overlap."""
+        a1 = [Author(name="John Smith"), Author(name="Jane Doe")]
+        a2 = [Author(name="John Smith"), Author(name="Bob Wilson")]
+        # 1 shared out of 3 unique = 0.33
+        sim = authors_similarity(a1, a2)
+        assert 0.3 <= sim <= 0.4
+
+    def test_uses_last_name_only(self):
+        """Author matching should use last name only."""
+        a1 = [Author(name="John Smith")]
+        a2 = [Author(name="J. Smith")]
+        assert authors_similarity(a1, a2) == 1.0
+
+    def test_handles_comma_format(self):
+        """Should handle 'Last, First' format."""
+        a1 = [Author(name="Smith, John")]
+        a2 = [Author(name="John Smith")]
+        assert authors_similarity(a1, a2) == 1.0
