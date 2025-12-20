@@ -1213,7 +1213,9 @@ class SnowballApp(App):
             self._log_event(f"[#a371f7]Snowball:[/#a371f7] iteration {self.project.current_iteration}, no new papers")
 
     def action_export(self) -> None:
-        """Export papers."""
+        """Export papers to BibTeX, CSV, and PNG graph."""
+        from ..visualization import generate_citation_graph
+
         papers = self.storage.load_all_papers()
         included_count = sum(1 for p in papers if p.status == PaperStatus.INCLUDED)
 
@@ -1229,8 +1231,20 @@ class SnowballApp(App):
         csv_path = self.project_dir / "export_all.csv"
         csv_exporter.export(papers, csv_path, only_included=False)
 
-        self.notify("Exported BibTeX and CSV", title="Export complete", severity="information")
-        self._log_event(f"[#d29922]Exported:[/#d29922] {included_count} included → BibTeX, {len(papers)} total → CSV")
+        # Export PNG graph
+        viz_dir = self.project_dir / "viz"
+        graph_path = generate_citation_graph(
+            papers=papers,
+            output_dir=viz_dir,
+            title=self.project.name,
+        )
+
+        if graph_path:
+            self.notify("Exported BibTeX, CSV, and graph", title="Export complete", severity="information")
+            self._log_event(f"[#d29922]Exported:[/#d29922] {included_count} included → BibTeX, CSV, PNG")
+        else:
+            self.notify("Exported BibTeX and CSV", title="Export complete", severity="information")
+            self._log_event(f"[#d29922]Exported:[/#d29922] {included_count} included → BibTeX, {len(papers)} total → CSV")
 
     def action_graph(self) -> None:
         """Generate citation network graph visualization."""

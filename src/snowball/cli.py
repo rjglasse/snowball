@@ -334,6 +334,22 @@ def export_results(args) -> None:
 
         logger.info(f"Exported TikZ to {tikz_path}")
 
+    # Export PNG graph
+    if args.format in ["png", "all"]:
+        from .visualization import generate_citation_graph
+
+        output_path = generate_citation_graph(
+            papers=papers,
+            output_dir=output_dir,
+            title=project.name,
+            included_only=args.included_only,
+        )
+
+        if output_path:
+            logger.info(f"Exported PNG graph to {output_path}")
+        else:
+            logger.warning("Could not generate PNG graph (missing matplotlib/networkx?)")
+
 
 def list_papers(args) -> None:
     """List papers in the project (non-interactive).
@@ -878,7 +894,7 @@ def main():
     export_parser = subparsers.add_parser("export", help="Export results")
     export_parser.add_argument("directory", help="Project directory")
     export_parser.add_argument(
-        "--format", choices=["bibtex", "csv", "tikz", "all"], default="all", help="Export format"
+        "--format", choices=["bibtex", "csv", "tikz", "png", "all"], default="all", help="Export format"
     )
     export_parser.add_argument("--output", help="Output directory")
     export_parser.add_argument(

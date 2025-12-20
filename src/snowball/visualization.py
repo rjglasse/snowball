@@ -239,10 +239,10 @@ def generate_citation_graph(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_file = output_dir / f"citation_graph_{timestamp}.png"
 
-    # Save high-res PNG
+    # Save PNG at screen resolution
     plt.savefig(
         output_file,
-        dpi=600,
+        dpi=150,
         facecolor="#0d1117",
         edgecolor="none",
         bbox_inches="tight",
