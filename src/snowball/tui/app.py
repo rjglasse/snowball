@@ -817,7 +817,9 @@ class SnowballApp(App):
 
     def _load_event_log(self) -> None:
         """Load event log from file (stored newest first, converted to oldest first for append)."""
-        log_file = self.project_dir / "event_log.txt"
+        logs_dir = self.project_dir / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        log_file = logs_dir / "event_log.txt"
         self._event_log = []
         self._event_log_raw = []
 
@@ -843,7 +845,9 @@ class SnowballApp(App):
 
     def _save_event_log(self) -> None:
         """Save event log to file (newest first for conventional log format)."""
-        log_file = self.project_dir / "event_log.txt"
+        logs_dir = self.project_dir / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        log_file = logs_dir / "event_log.txt"
         try:
             # Write newest-first (reverse of internal oldest-first list)
             with open(log_file, "w") as f:
