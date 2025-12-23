@@ -83,23 +83,35 @@ snowball review my-slr-project
 ```
 
 **Navigation:**
-- `↑`/`↓` Arrow keys: Navigate papers (details appear automatically)
-- `Enter`: Toggle detail view on/off
+- `↑`/`↓`: Navigate papers (details appear automatically)
+- `Enter`/`Space`: Toggle detail view on/off
+- `d`: Toggle details panel visibility
 - Click column headers: Sort by that column (ascending → descending → default)
 
 **Quick Review (Tinder-style):**
-- `→` Right arrow or `i`: Include paper (and advance to next)
-- `←` Left arrow or `e`: Exclude paper (and advance to next)
+- `→` or `i`: Include paper (and advance to next)
+- `←`: Exclude paper (and advance to next)
 
 **Review Actions:**
-- `m`: Mark as Maybe
-- `p`: Mark as Pending
 - `n`: Add/edit notes
-- `o`: Open paper's DOI or arXiv URL in browser
+- `u`: Undo last status change
 
-**Other Controls:**
+**Paper Actions:**
+- `o`: Open paper's DOI, arXiv URL, or search Google Scholar
+- `p`: Open local PDF file
+- `l`: Link/unlink a PDF to the current paper
+- `e`: Enrich metadata from APIs (abstract, citations, etc.)
+
+**Project Actions:**
 - `s`: Run another snowball iteration
-- `x`: Export results (BibTeX + CSV)
+- `x`: Export results (BibTeX, CSV, TikZ, PNG)
+- `f`: Cycle filter (All → Pending → Included → Excluded)
+- `g`: Generate citation network graph
+- `P`: Parse PDFs in pdfs/inbox/ folder (Shift+P)
+- `R`: Compute relevance scores (Shift+R)
+
+**Other:**
+- `?`: Show help with all shortcuts
 - `q`: Quit
 
 ### 5. Export Results
@@ -127,7 +139,45 @@ snowball export my-slr-project --format all
 - Without `--standalone`, generates TikZ code for embedding in your own LaTeX document
 - Papers are positioned by iteration (left to right) and sorted by citation count
 
-### 6. Update Citation Counts (Optional)
+### 6. Relevance Scoring (Optional)
+
+If you set a research question, Snowball can score papers by relevance to help prioritize review:
+
+```bash
+# Set research question during init
+snowball init my-slr-project \
+  --name "ML in Healthcare" \
+  --research-question "How is machine learning used for medical diagnosis?"
+
+# Or set/update research question later
+snowball set-rq my-slr-project "How is machine learning used for medical diagnosis?"
+
+# Compute relevance scores for pending papers
+snowball compute-relevance my-slr-project --method tfidf   # Fast, offline
+snowball compute-relevance my-slr-project --method llm     # Uses OpenAI API (requires OPENAI_API_KEY)
+```
+
+Relevance scores (0.0–1.0) appear in the "Rel" column in the TUI. Press `R` in the TUI to compute scores interactively.
+
+### 7. PDF Management
+
+Snowball supports two PDF workflows:
+
+**Automatic matching (inbox):**
+```bash
+# Place PDFs in pdfs/inbox/ folder
+cp paper1.pdf paper2.pdf my-slr-project/pdfs/inbox/
+
+# Parse and auto-match by title
+snowball parse-pdfs my-slr-project
+# Matched PDFs are moved to pdfs/, unmatched stay in inbox/
+```
+
+**Manual linking (TUI):**
+- Press `l` to link any PDF from pdfs/ or pdfs/inbox/ to the current paper
+- Press `p` to open the linked PDF
+
+### 8. Update Citation Counts (Optional)
 
 Update citation counts from Google Scholar for more accurate/current data:
 
@@ -143,6 +193,29 @@ snowball update-citations my-slr-project --delay 3
 ```
 
 **Note:** This uses Google Scholar scraping via the `scholarly` library. Use responsibly with appropriate delays to avoid being rate-limited.
+
+### 9. Non-Interactive Commands (Scripting/AI Agents)
+
+These commands support automation and AI-assisted workflows:
+
+```bash
+# List papers with filtering and sorting
+snowball list my-slr-project                           # All papers
+snowball list my-slr-project --status pending          # Only pending
+snowball list my-slr-project --iteration 1 --format json
+
+# Show detailed paper information
+snowball show my-slr-project --doi "10.1234/example"
+snowball show my-slr-project --title "Machine Learning" --format json
+
+# Update paper status programmatically
+snowball set-status my-slr-project --id <paper-id> --status included
+snowball set-status my-slr-project --doi "10.1234/example" --status excluded --notes "Out of scope"
+
+# Get project statistics
+snowball stats my-slr-project
+snowball stats my-slr-project --format json
+```
 
 ## Configuration
 
