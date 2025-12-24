@@ -40,6 +40,7 @@ from ..paper_utils import (
     titles_match,
 )
 
+from collections import deque
 
 class ReviewDialog(ModalScreen[Optional[tuple]]):
     """Modal dialog for reviewing a paper."""
@@ -590,7 +591,7 @@ class SnowballApp(App):
         self._event_log_dirty: bool = False  # Deferred save flag
 
         # Undo stack for status changes: (paper_id, previous_status, title)
-        self._last_status_change: Optional[tuple[str, PaperStatus, str]] = None
+        self._last_status_change: deque = deque(maxlen=20)
 
         # Cached widget references for performance (set in on_mount)
         self._detail_content: Optional[Static] = None
@@ -1031,11 +1032,11 @@ class SnowballApp(App):
         current_status = self.current_paper.status
         if isinstance(current_status, str):
             current_status = PaperStatus(current_status)
-        self._last_status_change = (
+        self._last_status_change.append((
             self.current_paper.id,
             current_status,
             self.current_paper.title,
-        )
+        ))
 
         # Get the current table position
         table = self.query_one("#papers-table", DataTable)
@@ -1095,8 +1096,7 @@ class SnowballApp(App):
             self.notify("Nothing to undo", severity="warning")
             return
 
-        paper_id, previous_status, title = self._last_status_change
-
+        paper_id, previous_status, title = self._last_status_change.pop()
         # Load the paper and restore its status
         paper = self.storage.load_paper(paper_id)
         if not paper:
@@ -1118,14 +1118,14 @@ class SnowballApp(App):
             PaperStatus.PENDING: "[#d29922]Pending[/#d29922]",
         }
         status_label = status_labels.get(previous_status, previous_status.value)
+        remaining = len(self._last_status_change)
+        self._log_event(f"[dim]Undo ({remaining} left):[/dim] {title} → {status_label}")
         self._log_event(f"[dim]Undo:[/dim] {title} → {status_label}")
 
-        # Clear the undo state (can only undo once)
-        self._last_status_change = None
 
         # Refresh display
         self._refresh_table()
-        self.notify(f"Undone: restored to {previous_status.value}", severity="information")
+        self.notify(f"Undone: restored to {previous_status.value}, remaining :{len(self._last_status_change)}", severity="information")
 
     def action_notes(self) -> None:
         """Add/edit notes for the selected paper."""
@@ -1927,7 +1927,7 @@ Press any key to close this help.
 
         # Flush any pending disk writes before exiting
         self.storage.shutdown()
-        self.exit()
+        self._refresh_table()
 
 
 def run_tui(
