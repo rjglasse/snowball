@@ -1124,7 +1124,10 @@ class SnowballApp(App):
 
         # Refresh display
         self._refresh_table()
-        self.notify(f"Undone: restored to {previous_status.value}, remaining :{len(self._last_status_change)}", severity="information")
+        self.notify(
+            f"Undone: restored to {previous_status.value}, remaining: {len(self._last_status_change)}",
+            severity="information",
+        )
 
     def action_notes(self) -> None:
         """Add/edit notes for the selected paper."""
