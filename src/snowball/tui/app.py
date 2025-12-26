@@ -1927,7 +1927,7 @@ Press any key to close this help.
 
         # Flush any pending disk writes before exiting
         self.storage.shutdown()
-        self._refresh_table()
+        self.exit()
 
 
 def run_tui(
