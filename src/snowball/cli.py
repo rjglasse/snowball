@@ -1,7 +1,6 @@
 """Command-line interface for Snowball SLR tool."""
 
 import os
-import sys
 import logging
 import json
 from pathlib import Path
@@ -634,9 +633,9 @@ def show(
 @app.command("set-status")
 def set_status(
     directory: Annotated[str, typer.Argument(help="Project directory")],
+    status: Annotated[PaperStatusChoice, typer.Option(help="New status (required)")],
     id: Annotated[Optional[str], typer.Option(help="Paper ID")] = None,
     doi: Annotated[Optional[str], typer.Option(help="Paper DOI")] = None,
-    status: Annotated[PaperStatusChoice, typer.Option(help="New status")] = ...,
     notes: Annotated[Optional[str], typer.Option(help="Review notes")] = None,
 ) -> None:
     """Set the status of a paper (non-interactive).
