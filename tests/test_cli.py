@@ -269,11 +269,12 @@ class TestCLIMain:
     """Tests for main CLI entry point."""
 
     def test_main_no_command(self):
-        """Test main with no command shows help."""
+        """Test main with no command shows help or returns usage error."""
         result = runner.invoke(app, [])
-        # Typer returns 2 for missing command (which is expected for missing required arguments)
-        # The help text should be shown when no command is provided
-        assert "Usage:" in result.stdout or result.exit_code in [0, 2]
+        # Typer returns 2 for missing required command (which is correct behavior for usage errors)
+        # The help text should be shown
+        assert result.exit_code == 2
+        assert "Usage:" in result.stdout
 
     def test_main_init_command(self):
         """Test main dispatches to init command."""

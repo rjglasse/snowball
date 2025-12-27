@@ -5,11 +5,10 @@ import logging
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Annotated
 from enum import Enum
 
 import typer
-from typing_extensions import Annotated
 
 from .models import ReviewProject, FilterCriteria, PaperStatus
 from .storage.json_storage import JSONStorage
@@ -633,7 +632,7 @@ def show(
 @app.command("set-status")
 def set_status(
     directory: Annotated[str, typer.Argument(help="Project directory")],
-    status: Annotated[PaperStatusChoice, typer.Option(help="New status (required)")],
+    status: Annotated[PaperStatusChoice, typer.Option(help="New status")],
     id: Annotated[Optional[str], typer.Option(help="Paper ID")] = None,
     doi: Annotated[Optional[str], typer.Option(help="Paper DOI")] = None,
     notes: Annotated[Optional[str], typer.Option(help="Review notes")] = None,
