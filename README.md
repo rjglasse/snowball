@@ -2,6 +2,8 @@
 
 A terminal-based tool for conducting Systematic Literature Reviews (SLR) using the snowballing methodology.
 
+**Snowball can be used both as a CLI/TUI application and as a Python library** for programmatic access to snowballing functionality.
+
 <img width="1770" height="757" alt="snowball-tui" src="https://github.com/user-attachments/assets/ce7b42f7-a0dd-480d-853b-b96ef9907087" />
 
 ## How it works
@@ -283,6 +285,66 @@ Configure auto-filtering in the `init` command or edit `project.json`:
   }
 }
 ```
+
+## Using Snowball as a Python Library
+
+Snowball can be used programmatically as a Python library, allowing you to integrate snowballing into your own workflows, scripts, or applications.
+
+### Quick Example
+
+```python
+from pathlib import Path
+from snowball import (
+    SnowballEngine,
+    JSONStorage,
+    APIAggregator,
+    ReviewProject,
+    FilterCriteria,
+)
+
+# Initialize components
+storage = JSONStorage(Path("my-project"))
+api = APIAggregator()
+engine = SnowballEngine(storage, api)
+
+# Create project
+project = ReviewProject(
+    name="My Review",
+    filter_criteria=FilterCriteria(min_year=2020),
+)
+storage.save_project(project)
+
+# Add seed paper
+paper = engine.add_seed_from_doi("10.1234/example.doi", project)
+
+# Run snowballing
+stats = engine.run_snowball_iteration(project, direction="both")
+print(f"Found {stats['added']} papers")
+
+# Get papers for review
+from snowball import PaperStatus
+pending = storage.get_papers_by_status(PaperStatus.PENDING)
+
+# Export results
+from snowball import BibTeXExporter
+exporter = BibTeXExporter()
+bibtex = exporter.export(storage.load_all_papers(), only_included=True)
+```
+
+For comprehensive documentation on using Snowball as a library, see **[API_USAGE.md](API_USAGE.md)**.
+
+### Available Components
+
+The public API includes:
+- **Core Engine**: `SnowballEngine` for running iterations
+- **Storage**: `JSONStorage` for persistence
+- **API Clients**: `APIAggregator`, `SemanticScholarClient`, `OpenAlexClient`, etc.
+- **Parsers**: `PDFParser` for extracting metadata from PDFs
+- **Exporters**: `BibTeXExporter`, `CSVExporter`, `TikZExporter`
+- **Filters**: `FilterEngine` for applying criteria
+- **Scoring**: `TFIDFScorer`, `LLMScorer` for relevance scoring
+- **Models**: `Paper`, `ReviewProject`, `FilterCriteria`, etc.
+
 ## Troubleshooting
 
 ### PDF Parsing Issues
