@@ -1,12 +1,14 @@
 """Command-line interface for Snowball SLR tool."""
 
 import os
-import sys
 import logging
 import json
 from pathlib import Path
 from datetime import datetime
-import argparse
+from typing import Optional, List, Annotated
+from enum import Enum
+
+import typer
 
 from .models import ReviewProject, FilterCriteria, PaperStatus
 from .storage.json_storage import JSONStorage
@@ -33,9 +35,67 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Create Typer app
+app = typer.Typer(help="Snowball - Systematic Literature Review using Snowballing")
 
-def get_api_config(args) -> dict:
-    """Get API configuration from args or environment variables.
+
+# Define enums for choice parameters
+class ExportFormat(str, Enum):
+    bibtex = "bibtex"
+    csv = "csv"
+    tikz = "tikz"
+    png = "png"
+    all = "all"
+
+
+class SnowballDirection(str, Enum):
+    backward = "backward"
+    forward = "forward"
+    both = "both"
+
+
+class PaperStatusChoice(str, Enum):
+    pending = "pending"
+    included = "included"
+    excluded = "excluded"
+
+
+class PaperSourceChoice(str, Enum):
+    seed = "seed"
+    backward = "backward"
+    forward = "forward"
+
+
+class SortChoice(str, Enum):
+    citations = "citations"
+    year = "year"
+    title = "title"
+    status = "status"
+
+
+class OutputFormat(str, Enum):
+    table = "table"
+    json = "json"
+
+
+class TextOrJsonFormat(str, Enum):
+    text = "text"
+    json = "json"
+
+
+class ScoringMethod(str, Enum):
+    tfidf = "tfidf"
+    llm = "llm"
+
+
+def get_api_config(
+    s2_api_key: Optional[str] = None,
+    email: Optional[str] = None,
+    use_scholar: bool = False,
+    scholar_proxy: Optional[str] = None,
+    scholar_free_proxy: bool = False,
+) -> dict:
+    """Get API configuration from arguments or environment variables.
 
     Environment variables:
         SEMANTIC_SCHOLAR_API_KEY: Semantic Scholar API key
@@ -44,17 +104,13 @@ def get_api_config(args) -> dict:
     Returns:
         Dict with keys: s2_api_key, email, use_apis, scholar_proxy, scholar_free_proxy
     """
-    s2_api_key = getattr(args, "s2_api_key", None) or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
-    email = getattr(args, "email", None) or os.environ.get("SNOWBALL_EMAIL")
+    s2_api_key = s2_api_key or os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
+    email = email or os.environ.get("SNOWBALL_EMAIL")
 
     # Build API list - google_scholar only if explicitly enabled
     use_apis = ["semantic_scholar", "crossref", "openalex", "arxiv"]
-    if getattr(args, "use_scholar", False):
+    if use_scholar:
         use_apis.append("google_scholar")
-
-    # Proxy settings for Google Scholar
-    scholar_proxy = getattr(args, "scholar_proxy", None)
-    scholar_free_proxy = getattr(args, "scholar_free_proxy", False)
 
     return {
         "s2_api_key": s2_api_key,
@@ -65,13 +121,23 @@ def get_api_config(args) -> dict:
     }
 
 
-def init_project(args) -> None:
+@app.command()
+def init(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    name: Annotated[Optional[str], typer.Option(help="Project name")] = None,
+    description: Annotated[Optional[str], typer.Option(help="Project description")] = None,
+    min_year: Annotated[Optional[int], typer.Option(help="Minimum publication year")] = None,
+    max_year: Annotated[Optional[int], typer.Option(help="Maximum publication year")] = None,
+    research_question: Annotated[
+        Optional[str], typer.Option("--research-question", "-rq", help="Research question for relevance scoring")
+    ] = None,
+) -> None:
     """Initialize a new SLR project."""
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if project_dir.exists() and any(project_dir.iterdir()):
         logger.error(f"Directory {project_dir} already exists and is not empty")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     project_dir.mkdir(parents=True, exist_ok=True)
 
@@ -83,14 +149,14 @@ def init_project(args) -> None:
 
     # Create project
     project = ReviewProject(
-        name=args.name or project_dir.name,
-        description=args.description or "",
-        research_question=getattr(args, "research_question", None),
+        name=name or project_dir.name,
+        description=description or "",
+        research_question=research_question,
     )
 
     # Set up filters if provided
-    if args.min_year or args.max_year:
-        project.filter_criteria = FilterCriteria(min_year=args.min_year, max_year=args.max_year)
+    if min_year or max_year:
+        project.filter_criteria = FilterCriteria(min_year=min_year, max_year=max_year)
 
     # Save project
     storage.save_project(project)
@@ -98,13 +164,33 @@ def init_project(args) -> None:
     logger.info(f"Initialized project '{project.name}' in {project_dir}")
 
 
-def add_seed(args) -> None:
+@app.command("add-seed")
+def add_seed(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    pdf: Annotated[Optional[List[str]], typer.Option(help="Path(s) to seed PDF file(s)")] = None,
+    doi: Annotated[Optional[List[str]], typer.Option(help="DOI(s) of seed paper(s)")] = None,
+    s2_api_key: Annotated[Optional[str], typer.Option(help="Semantic Scholar API key")] = None,
+    email: Annotated[Optional[str], typer.Option(help="Email for API polite pools")] = None,
+    no_grobid: Annotated[bool, typer.Option(help="Don't use GROBID for PDF parsing")] = False,
+    use_scholar: Annotated[
+        bool,
+        typer.Option(help="Enable Google Scholar API (disabled by default due to rate limiting)"),
+    ] = False,
+    scholar_proxy: Annotated[
+        Optional[str],
+        typer.Option(help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"),
+    ] = None,
+    scholar_free_proxy: Annotated[
+        bool,
+        typer.Option(help="Use free rotating proxies for Google Scholar (requires free-proxy package)"),
+    ] = False,
+) -> None:
     """Add seed paper(s) to the project."""
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Load project
     storage = JSONStorage(project_dir)
@@ -112,24 +198,24 @@ def add_seed(args) -> None:
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Set up API and engine
-    api_config = get_api_config(args)
+    api_config = get_api_config(s2_api_key, email, use_scholar, scholar_proxy, scholar_free_proxy)
     api = APIAggregator(**api_config)
-    pdf_parser = PDFParser(use_grobid=not args.no_grobid)
+    pdf_parser = PDFParser(use_grobid=not no_grobid)
     engine = SnowballEngine(storage, api, pdf_parser)
 
     # Add seeds
     added_count = 0
 
-    if args.pdf:
+    if pdf:
         import shutil
 
         pdfs_dir = project_dir / "pdfs"
         pdfs_dir.mkdir(exist_ok=True)
 
-        for pdf_path in args.pdf:
+        for pdf_path in pdf:
             pdf_file = Path(pdf_path)
             if not pdf_file.exists():
                 logger.warning(f"PDF not found: {pdf_file}")
@@ -146,9 +232,9 @@ def add_seed(args) -> None:
                 logger.info(f"  PDF copied to: {dest_pdf}")
                 added_count += 1
 
-    if args.doi:
-        for doi in args.doi:
-            paper = engine.add_seed_from_doi(doi, project)
+    if doi:
+        for doi_str in doi:
+            paper = engine.add_seed_from_doi(doi_str, project)
             if paper:
                 logger.info(f"Added seed: {paper.title}")
                 added_count += 1
@@ -156,13 +242,39 @@ def add_seed(args) -> None:
     logger.info(f"Added {added_count} seed paper(s)")
 
 
-def run_snowball(args) -> None:
+@app.command()
+def snowball(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    iterations: Annotated[Optional[int], typer.Option(help="Number of iterations to run")] = None,
+    direction: Annotated[
+        SnowballDirection,
+        typer.Option(help="Snowballing direction: backward (references), forward (citations), or both (default)"),
+    ] = SnowballDirection.both,
+    s2_api_key: Annotated[Optional[str], typer.Option(help="Semantic Scholar API key")] = None,
+    email: Annotated[Optional[str], typer.Option(help="Email for API polite pools")] = None,
+    force: Annotated[
+        bool,
+        typer.Option(help="Force iteration even if there are unreviewed papers (not recommended)"),
+    ] = False,
+    use_scholar: Annotated[
+        bool,
+        typer.Option(help="Enable Google Scholar API (disabled by default due to rate limiting)"),
+    ] = False,
+    scholar_proxy: Annotated[
+        Optional[str],
+        typer.Option(help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"),
+    ] = None,
+    scholar_free_proxy: Annotated[
+        bool,
+        typer.Option(help="Use free rotating proxies for Google Scholar (requires free-proxy package)"),
+    ] = False,
+) -> None:
     """Run snowballing iterations."""
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Load project
     storage = JSONStorage(project_dir)
@@ -170,21 +282,20 @@ def run_snowball(args) -> None:
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Set up API and engine
-    api_config = get_api_config(args)
+    api_config = get_api_config(s2_api_key, email, use_scholar, scholar_proxy, scholar_free_proxy)
     api = APIAggregator(**api_config)
     engine = SnowballEngine(storage, api)
 
     # Check if we can start (unless --force is used)
-    force = getattr(args, "force", False)
     if not force:
         can_start, reason = engine.can_start_iteration(project)
         if not can_start:
             logger.error(reason)
             logger.info("Use --force to bypass this check (not recommended)")
-            sys.exit(1)
+            raise typer.Exit(1)
 
     # Run iterations
     iteration_count = 0
@@ -198,7 +309,7 @@ def run_snowball(args) -> None:
 
         logger.info(f"\nRunning snowball iteration {project.current_iteration + 1}...")
 
-        stats = engine.run_snowball_iteration(project, direction=args.direction)
+        stats = engine.run_snowball_iteration(project, direction=direction.value)
 
         logger.info(f"Iteration {project.current_iteration} complete:")
         logger.info(f"  - Discovered: {stats['added']} papers")
@@ -211,7 +322,7 @@ def run_snowball(args) -> None:
         project = storage.load_project()
         iteration_count += 1
 
-        if args.iterations and iteration_count >= args.iterations:
+        if iterations and iteration_count >= iterations:
             break
 
     logger.info(f"\nSnowballing complete. Ran {iteration_count} iteration(s).")
@@ -223,13 +334,30 @@ def run_snowball(args) -> None:
     logger.info(f"  By status: {summary['by_status']}")
 
 
-def review(args) -> None:
+@app.command()
+def review(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    s2_api_key: Annotated[Optional[str], typer.Option(help="Semantic Scholar API key")] = None,
+    email: Annotated[Optional[str], typer.Option(help="Email for API polite pools")] = None,
+    use_scholar: Annotated[
+        bool,
+        typer.Option(help="Enable Google Scholar API (disabled by default due to rate limiting)"),
+    ] = False,
+    scholar_proxy: Annotated[
+        Optional[str],
+        typer.Option(help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"),
+    ] = None,
+    scholar_free_proxy: Annotated[
+        bool,
+        typer.Option(help="Use free rotating proxies for Google Scholar (requires free-proxy package)"),
+    ] = False,
+) -> None:
     """Launch the interactive review interface."""
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Load project
     storage = JSONStorage(project_dir)
@@ -237,16 +365,15 @@ def review(args) -> None:
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Set up API and engine
-    api_config = get_api_config(args)
+    api_config = get_api_config(s2_api_key, email, use_scholar, scholar_proxy, scholar_free_proxy)
     api = APIAggregator(**api_config)
     engine = SnowballEngine(storage, api)
 
     # Redirect logging to file to avoid corrupting TUI display
     # Each session gets its own timestamped log file
-    from datetime import datetime
     logs_dir = project_dir / "logs"
     logs_dir.mkdir(exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -269,13 +396,22 @@ def review(args) -> None:
     run_tui(project_dir, storage, engine, project)
 
 
-def export_results(args) -> None:
+@app.command()
+def export(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    format: Annotated[ExportFormat, typer.Option(help="Export format")] = ExportFormat.all,
+    output: Annotated[Optional[str], typer.Option(help="Output directory")] = None,
+    included_only: Annotated[bool, typer.Option(help="Only export included papers")] = False,
+    standalone: Annotated[
+        bool, typer.Option(help="Generate standalone LaTeX document (for TikZ)")
+    ] = False,
+) -> None:
     """Export results to various formats."""
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Load project and papers
     storage = JSONStorage(project_dir)
@@ -283,7 +419,7 @@ def export_results(args) -> None:
 
     if not project:
         logger.error("No project found.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     papers = storage.load_all_papers()
 
@@ -292,17 +428,17 @@ def export_results(args) -> None:
         return
 
     # Default to output/ subfolder for tidy organization
-    if args.output:
-        output_dir = Path(args.output)
+    if output:
+        output_dir = Path(output)
     else:
         output_dir = project_dir / "output"
     output_dir.mkdir(exist_ok=True)
 
     # Export BibTeX
-    if args.format in ["bibtex", "all"]:
+    if format in [ExportFormat.bibtex, ExportFormat.all]:
         bibtex_exporter = BibTeXExporter()
 
-        if args.included_only:
+        if included_only:
             bibtex_content = bibtex_exporter.export(papers, only_included=True)
             bibtex_path = output_dir / "included_papers.bib"
         else:
@@ -315,10 +451,10 @@ def export_results(args) -> None:
         logger.info(f"Exported BibTeX to {bibtex_path}")
 
     # Export CSV
-    if args.format in ["csv", "all"]:
+    if format in [ExportFormat.csv, ExportFormat.all]:
         csv_exporter = CSVExporter()
 
-        if args.included_only:
+        if included_only:
             csv_path = output_dir / "included_papers.csv"
             csv_exporter.export(papers, csv_path, only_included=True)
         else:
@@ -328,17 +464,17 @@ def export_results(args) -> None:
         logger.info(f"Exported CSV to {csv_path}")
 
     # Export TikZ
-    if args.format in ["tikz", "all"]:
+    if format in [ExportFormat.tikz, ExportFormat.all]:
         tikz_exporter = TikZExporter()
 
-        if args.included_only:
+        if included_only:
             tikz_content = tikz_exporter.export(
-                papers, only_included=True, standalone=args.standalone
+                papers, only_included=True, standalone=standalone
             )
             tikz_path = output_dir / "citation_graph_included.tex"
         else:
             tikz_content = tikz_exporter.export(
-                papers, only_included=False, standalone=args.standalone
+                papers, only_included=False, standalone=standalone
             )
             tikz_path = output_dir / "citation_graph_all.tex"
 
@@ -348,14 +484,14 @@ def export_results(args) -> None:
         logger.info(f"Exported TikZ to {tikz_path}")
 
     # Export PNG graph
-    if args.format in ["png", "all"]:
+    if format in [ExportFormat.png, ExportFormat.all]:
         from .visualization import generate_citation_graph
 
         output_path = generate_citation_graph(
             papers=papers,
             output_dir=output_dir,
             title=project.name,
-            included_only=args.included_only,
+            included_only=included_only,
         )
 
         if output_path:
@@ -364,35 +500,56 @@ def export_results(args) -> None:
             logger.warning("Could not generate PNG graph (missing matplotlib/networkx?)")
 
 
-def list_papers(args) -> None:
+@app.command("list")
+def list_papers(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    status: Annotated[
+        Optional[PaperStatusChoice], typer.Option(help="Filter by status")
+    ] = None,
+    iteration: Annotated[Optional[int], typer.Option(help="Filter by snowball iteration")] = None,
+    source: Annotated[
+        Optional[PaperSourceChoice], typer.Option(help="Filter by source")
+    ] = None,
+    sort: Annotated[
+        SortChoice, typer.Option(help="Sort order (default: citations)")
+    ] = SortChoice.citations,
+    format: Annotated[
+        OutputFormat, typer.Option(help="Output format (default: table)")
+    ] = OutputFormat.table,
+) -> None:
     """List papers in the project (non-interactive).
 
     This command provides a non-interactive way to view papers,
     suitable for AI agents and scripted workflows.
     """
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     storage = JSONStorage(project_dir)
     project = storage.load_project()
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     papers = storage.load_all_papers()
 
     # Filter papers using shared function
-    papers = filter_papers(papers, status=args.status, iteration=args.iteration, source=args.source)
+    papers = filter_papers(
+        papers,
+        status=status.value if status else None,
+        iteration=iteration,
+        source=source.value if source else None,
+    )
 
     # Sort papers using shared function
-    papers = sort_papers(papers, sort_by=args.sort, ascending=False)
+    papers = sort_papers(papers, sort_by=sort.value, ascending=False)
 
     # Output format
-    if args.format == "json":
+    if format == OutputFormat.json:
         output = [paper_to_dict(paper) for paper in papers]
         print(json.dumps(output, indent=2))
     else:
@@ -400,62 +557,71 @@ def list_papers(args) -> None:
         print(f"\n{'ID':<38} {'Status':<10} {'Year':<6} {'Citations':<10} {'Title'}")
         print("-" * 120)
         for paper in papers:
-            status = get_status_value(paper.status)
+            status_str = get_status_value(paper.status)
             year = str(paper.year) if paper.year else "-"
             citations = str(paper.citation_count) if paper.citation_count is not None else "-"
             title = truncate_title(paper.title)
-            print(f"{paper.id:<38} {status:<10} {year:<6} {citations:<10} {title}")
+            print(f"{paper.id:<38} {status_str:<10} {year:<6} {citations:<10} {title}")
 
         print(f"\nTotal: {len(papers)} paper(s)")
 
 
-def show_paper(args) -> None:
+@app.command()
+def show(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    id: Annotated[Optional[str], typer.Option(help="Paper ID")] = None,
+    doi: Annotated[Optional[str], typer.Option(help="Paper DOI")] = None,
+    title: Annotated[Optional[str], typer.Option(help="Paper title (exact or partial match)")] = None,
+    format: Annotated[
+        TextOrJsonFormat, typer.Option(help="Output format (default: text)")
+    ] = TextOrJsonFormat.text,
+) -> None:
     """Show details of a specific paper (non-interactive).
 
     This command provides a non-interactive way to view paper details,
     suitable for AI agents and scripted workflows.
     """
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     storage = JSONStorage(project_dir)
     project = storage.load_project()
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Find paper by ID, DOI, or title search
     paper = None
-    if args.id:
-        paper = storage.load_paper(args.id)
-    elif args.doi:
-        paper = storage.find_paper_by_doi(args.doi)
-    elif args.title:
-        paper = storage.find_paper_by_title(args.title)
+    if id:
+        paper = storage.load_paper(id)
+    elif doi:
+        paper = storage.find_paper_by_doi(doi)
+    elif title:
+        paper = storage.find_paper_by_title(title)
         if not paper:
             # Try partial match
             papers = storage.load_all_papers()
-            title_lower = args.title.lower()
+            title_lower = title.lower()
             matches = [p for p in papers if title_lower in p.title.lower()]
             if len(matches) == 1:
                 paper = matches[0]
             elif len(matches) > 1:
-                logger.error(f"Multiple papers match '{args.title}':")
+                logger.error(f"Multiple papers match '{title}':")
                 for p in matches:
                     logger.error(f"  ID: {p.id} - {p.title}")
                 logger.error("Please use --id to specify the exact paper.")
-                sys.exit(1)
+                raise typer.Exit(1)
 
     if not paper:
         logger.error("Paper not found")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Output format
-    if args.format == "json":
+    if format == TextOrJsonFormat.json:
         output = paper_to_dict(paper, include_abstract=True)
         print(json.dumps(output, indent=2))
     else:
@@ -463,35 +629,42 @@ def show_paper(args) -> None:
         print(format_paper_text(paper))
 
 
-def set_status(args) -> None:
+@app.command("set-status")
+def set_status(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    status: Annotated[PaperStatusChoice, typer.Option(help="New status")],
+    id: Annotated[Optional[str], typer.Option(help="Paper ID")] = None,
+    doi: Annotated[Optional[str], typer.Option(help="Paper DOI")] = None,
+    notes: Annotated[Optional[str], typer.Option(help="Review notes")] = None,
+) -> None:
     """Set the status of a paper (non-interactive).
 
     This command provides a non-interactive way to update paper status,
     suitable for AI agents and scripted workflows.
     """
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     storage = JSONStorage(project_dir)
     project = storage.load_project()
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Find paper
     paper = None
-    if args.id:
-        paper = storage.load_paper(args.id)
-    elif args.doi:
-        paper = storage.find_paper_by_doi(args.doi)
+    if id:
+        paper = storage.load_paper(id)
+    elif doi:
+        paper = storage.find_paper_by_doi(doi)
 
     if not paper:
         logger.error("Paper not found")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Map status string to enum
     status_map = {
@@ -500,47 +673,53 @@ def set_status(args) -> None:
         "excluded": PaperStatus.EXCLUDED,
     }
 
-    new_status = status_map.get(args.status)
+    new_status = status_map.get(status.value)
     if not new_status:
-        logger.error(f"Invalid status: {args.status}")
-        sys.exit(1)
+        logger.error(f"Invalid status: {status.value}")
+        raise typer.Exit(1)
 
     # Update paper
     old_status = get_status_value(paper.status)
     paper.status = new_status
-    if args.notes:
-        paper.notes = args.notes
+    if notes:
+        paper.notes = notes
     paper.review_date = datetime.now()
 
     storage.save_paper(paper)
 
     logger.info(f"Updated paper '{paper.title}'")
-    logger.info(f"  Status: {old_status} -> {args.status}")
-    if args.notes:
-        logger.info(f"  Notes: {args.notes}")
+    logger.info(f"  Status: {old_status} -> {status.value}")
+    if notes:
+        logger.info(f"  Notes: {notes}")
 
 
-def show_stats(args) -> None:
+@app.command()
+def stats(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    format: Annotated[
+        TextOrJsonFormat, typer.Option(help="Output format (default: text)")
+    ] = TextOrJsonFormat.text,
+) -> None:
     """Show project statistics (non-interactive).
 
     This command provides a non-interactive way to view statistics,
     suitable for AI agents and scripted workflows. Includes detailed
     iteration stats for accountability.
     """
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     storage = JSONStorage(project_dir)
     project = storage.load_project()
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
-    stats = storage.get_statistics()
+    statistics = storage.get_statistics()
 
     # Build iteration stats for output
     iteration_details = {}
@@ -556,14 +735,14 @@ def show_stats(args) -> None:
             "reviewed": iter_stats.reviewed,
         }
 
-    if args.format == "json":
+    if format == TextOrJsonFormat.json:
         output = {
             "project_name": project.name,
             "current_iteration": project.current_iteration,
-            "total_papers": stats["total"],
-            "by_status": stats["by_status"],
-            "by_iteration": stats["by_iteration"],
-            "by_source": stats["by_source"],
+            "total_papers": statistics["total"],
+            "by_status": statistics["by_status"],
+            "by_iteration": statistics["by_iteration"],
+            "by_source": statistics["by_source"],
             "seed_count": len(project.seed_paper_ids),
             "iteration_stats": iteration_details,
         }
@@ -574,13 +753,13 @@ def show_stats(args) -> None:
         print(f"{'=' * 60}")
         print(f"Current iteration: {project.current_iteration}")
         print(f"Seed papers:       {len(project.seed_paper_ids)}")
-        print(f"Total papers:      {stats['total']}")
+        print(f"Total papers:      {statistics['total']}")
         print()
 
         # Overall status summary
         print("Overall Status:")
-        for status, count in stats["by_status"].items():
-            print(f"  {status}: {count}")
+        for status_key, count in statistics["by_status"].items():
+            print(f"  {status_key}: {count}")
         print()
 
         # Detailed iteration stats for accountability
@@ -608,18 +787,29 @@ def show_stats(args) -> None:
 
         print()
         print("By Source:")
-        for source, count in stats["by_source"].items():
-            print(f"  {source}: {count}")
+        for source_key, count in statistics["by_source"].items():
+            print(f"  {source_key}: {count}")
         print()
 
 
-def update_citations(args) -> None:
+@app.command("update-citations")
+def update_citations(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    status: Annotated[
+        Optional[PaperStatusChoice],
+        typer.Option(help="Only update papers with this status"),
+    ] = None,
+    delay: Annotated[
+        float,
+        typer.Option(help="Delay between Google Scholar requests in seconds (default: 5.0)"),
+    ] = 5.0,
+) -> None:
     """Update citation counts from Google Scholar."""
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Load project
     storage = JSONStorage(project_dir)
@@ -627,33 +817,31 @@ def update_citations(args) -> None:
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Set up engine (no API needed for citation update)
-    from .apis.aggregator import APIAggregator
-
     api = APIAggregator()
     engine = SnowballEngine(storage, api)
 
     # Get papers to update
     papers = None
-    if args.status:
+    if status:
         status_map = {
-            "pending": PaperStatus.PENDING,
-            "included": PaperStatus.INCLUDED,
-            "excluded": PaperStatus.EXCLUDED,
+            PaperStatusChoice.pending: PaperStatus.PENDING,
+            PaperStatusChoice.included: PaperStatus.INCLUDED,
+            PaperStatusChoice.excluded: PaperStatus.EXCLUDED,
         }
-        papers = storage.get_papers_by_status(status_map[args.status])
-        logger.info(f"Updating {len(papers)} papers with status '{args.status}'")
+        papers = storage.get_papers_by_status(status_map[status])
+        logger.info(f"Updating {len(papers)} papers with status '{status.value}'")
 
     # Run update
-    stats = engine.update_citations_from_google_scholar(papers=papers, rate_limit_delay=args.delay)
+    stats_result = engine.update_citations_from_google_scholar(papers=papers, rate_limit_delay=delay)
 
     logger.info(f"\nUpdate complete:")
-    logger.info(f"  Total papers: {stats['total']}")
-    logger.info(f"  Updated: {stats['updated']}")
-    logger.info(f"  Failed: {stats['failed']}")
-    logger.info(f"  Skipped: {stats['skipped']}")
+    logger.info(f"  Total papers: {stats_result['total']}")
+    logger.info(f"  Updated: {stats_result['updated']}")
+    logger.info(f"  Failed: {stats_result['failed']}")
+    logger.info(f"  Skipped: {stats_result['skipped']}")
 
 
 def _titles_match(title1: str, title2: str, threshold: float = 0.8) -> bool:
@@ -717,13 +905,16 @@ def _find_paper_by_title_fuzzy(papers: list, title: str, threshold: float = 0.8)
     return best_match
 
 
-def parse_pdfs(args) -> None:
+@app.command("parse-pdfs")
+def parse_pdfs(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+) -> None:
     """Parse PDFs in the pdfs/ folder and attach references to matching papers."""
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Load project
     storage = JSONStorage(project_dir)
@@ -731,7 +922,7 @@ def parse_pdfs(args) -> None:
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Check for pdfs directory
     pdfs_dir = project_dir / "pdfs"
@@ -816,78 +1007,97 @@ def parse_pdfs(args) -> None:
         logger.info("\nReferences will be used in the next snowball iteration.")
 
 
-def set_research_question(args) -> None:
+@app.command("set-rq")
+def set_research_question(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    question: Annotated[str, typer.Argument(help="Research question text")],
+) -> None:
     """Set or update the research question for a project."""
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     storage = JSONStorage(project_dir)
     project = storage.load_project()
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
-    project.research_question = args.question
+    project.research_question = question
     storage.save_project(project)
 
-    logger.info(f"Research question set: {args.question}")
+    logger.info(f"Research question set: {question}")
 
 
-def compute_relevance(args) -> None:
+@app.command("compute-relevance")
+def compute_relevance(
+    directory: Annotated[str, typer.Argument(help="Project directory")],
+    method: Annotated[
+        ScoringMethod,
+        typer.Option(
+            help="Scoring method: tfidf (fast, offline) or llm (OpenAI API, requires OPENAI_API_KEY)"
+        ),
+    ] = ScoringMethod.tfidf,
+    model: Annotated[
+        str, typer.Option(help="LLM model to use (default: gpt-4o-mini)")
+    ] = "gpt-4o-mini",
+    status: Annotated[
+        Optional[PaperStatusChoice],
+        typer.Option(help="Only score papers with this status"),
+    ] = None,
+) -> None:
     """Compute relevance scores for papers against the research question."""
-    project_dir = Path(args.directory)
+    project_dir = Path(directory)
 
     if not project_dir.exists():
         logger.error(f"Project directory {project_dir} does not exist")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     storage = JSONStorage(project_dir)
     project = storage.load_project()
 
     if not project:
         logger.error("No project found. Run 'snowball init' first.")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     if not project.research_question:
         logger.error("No research question set. Use 'snowball set-rq' or re-init with --research-question")
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Get papers to score
     papers = storage.load_all_papers()
 
-    if args.status:
+    if status:
         status_map = {
-            "pending": PaperStatus.PENDING,
-            "included": PaperStatus.INCLUDED,
-            "excluded": PaperStatus.EXCLUDED,
+            PaperStatusChoice.pending: PaperStatus.PENDING,
+            PaperStatusChoice.included: PaperStatus.INCLUDED,
+            PaperStatusChoice.excluded: PaperStatus.EXCLUDED,
         }
-        papers = [p for p in papers if p.status == status_map[args.status]]
+        papers = [p for p in papers if p.status == status_map[status]]
 
     if not papers:
         logger.info("No papers to score")
         return
 
-    method = args.method
-    logger.info(f"Scoring {len(papers)} papers using {method.upper()} method...")
+    logger.info(f"Scoring {len(papers)} papers using {method.value.upper()} method...")
 
     # Get scorer
     from .scoring import get_scorer
 
     try:
         scorer_kwargs = {}
-        if method == "llm" and args.model:
-            scorer_kwargs["model"] = args.model
-        scorer = get_scorer(method, **scorer_kwargs)
+        if method == ScoringMethod.llm and model:
+            scorer_kwargs["model"] = model
+        scorer = get_scorer(method.value, **scorer_kwargs)
     except ImportError as e:
         logger.error(str(e))
-        sys.exit(1)
+        raise typer.Exit(1)
     except ValueError as e:
         logger.error(str(e))
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Progress callback
     def progress(current, total):
@@ -910,255 +1120,7 @@ def compute_relevance(args) -> None:
 
 def main():
     """Main CLI entry point."""
-    parser = argparse.ArgumentParser(
-        description="Snowball - Systematic Literature Review using Snowballing"
-    )
-
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-
-    # Init command
-    init_parser = subparsers.add_parser("init", help="Initialize a new SLR project")
-    init_parser.add_argument("directory", help="Project directory")
-    init_parser.add_argument("--name", help="Project name")
-    init_parser.add_argument("--description", help="Project description")
-    init_parser.add_argument("--min-year", type=int, help="Minimum publication year")
-    init_parser.add_argument("--max-year", type=int, help="Maximum publication year")
-    init_parser.add_argument(
-        "--research-question", "-rq",
-        help="Research question for relevance scoring"
-    )
-
-    # Add seed command
-    seed_parser = subparsers.add_parser("add-seed", help="Add seed paper(s)")
-    seed_parser.add_argument("directory", help="Project directory")
-    seed_parser.add_argument("--pdf", nargs="+", help="Path(s) to seed PDF file(s)")
-    seed_parser.add_argument("--doi", nargs="+", help="DOI(s) of seed paper(s)")
-    seed_parser.add_argument("--s2-api-key", help="Semantic Scholar API key")
-    seed_parser.add_argument("--email", help="Email for API polite pools")
-    seed_parser.add_argument(
-        "--no-grobid", action="store_true", help="Don't use GROBID for PDF parsing"
-    )
-    seed_parser.add_argument(
-        "--use-scholar", action="store_true",
-        help="Enable Google Scholar API (disabled by default due to rate limiting)"
-    )
-    seed_parser.add_argument(
-        "--scholar-proxy",
-        help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"
-    )
-    seed_parser.add_argument(
-        "--scholar-free-proxy", action="store_true",
-        help="Use free rotating proxies for Google Scholar (requires free-proxy package)"
-    )
-
-    # Snowball command
-    snowball_parser = subparsers.add_parser("snowball", help="Run snowballing iterations")
-    snowball_parser.add_argument("directory", help="Project directory")
-    snowball_parser.add_argument("--iterations", type=int, help="Number of iterations to run")
-    snowball_parser.add_argument(
-        "--direction",
-        choices=["backward", "forward", "both"],
-        default="both",
-        help="Snowballing direction: backward (references), forward (citations), or both (default)",
-    )
-    snowball_parser.add_argument("--s2-api-key", help="Semantic Scholar API key")
-    snowball_parser.add_argument("--email", help="Email for API polite pools")
-    snowball_parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force iteration even if there are unreviewed papers (not recommended)",
-    )
-    snowball_parser.add_argument(
-        "--use-scholar", action="store_true",
-        help="Enable Google Scholar API (disabled by default due to rate limiting)"
-    )
-    snowball_parser.add_argument(
-        "--scholar-proxy",
-        help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"
-    )
-    snowball_parser.add_argument(
-        "--scholar-free-proxy", action="store_true",
-        help="Use free rotating proxies for Google Scholar (requires free-proxy package)"
-    )
-
-    # Review command
-    review_parser = subparsers.add_parser("review", help="Launch interactive review interface")
-    review_parser.add_argument("directory", help="Project directory")
-    review_parser.add_argument("--s2-api-key", help="Semantic Scholar API key")
-    review_parser.add_argument("--email", help="Email for API polite pools")
-    review_parser.add_argument(
-        "--use-scholar", action="store_true",
-        help="Enable Google Scholar API (disabled by default due to rate limiting)"
-    )
-    review_parser.add_argument(
-        "--scholar-proxy",
-        help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"
-    )
-    review_parser.add_argument(
-        "--scholar-free-proxy", action="store_true",
-        help="Use free rotating proxies for Google Scholar (requires free-proxy package)"
-    )
-
-    # Export command
-    export_parser = subparsers.add_parser("export", help="Export results")
-    export_parser.add_argument("directory", help="Project directory")
-    export_parser.add_argument(
-        "--format", choices=["bibtex", "csv", "tikz", "png", "all"], default="all", help="Export format"
-    )
-    export_parser.add_argument("--output", help="Output directory")
-    export_parser.add_argument(
-        "--included-only", action="store_true", help="Only export included papers"
-    )
-    export_parser.add_argument(
-        "--standalone", action="store_true", help="Generate standalone LaTeX document (for TikZ)"
-    )
-
-    # List command (non-interactive)
-    list_parser = subparsers.add_parser(
-        "list", help="List papers non-interactively (for AI agents/scripts)"
-    )
-    list_parser.add_argument("directory", help="Project directory")
-    list_parser.add_argument(
-        "--status", choices=["pending", "included", "excluded"], help="Filter by status"
-    )
-    list_parser.add_argument("--iteration", type=int, help="Filter by snowball iteration")
-    list_parser.add_argument(
-        "--source", choices=["seed", "backward", "forward"], help="Filter by source"
-    )
-    list_parser.add_argument(
-        "--sort",
-        choices=["citations", "year", "title", "status"],
-        default="citations",
-        help="Sort order (default: citations)",
-    )
-    list_parser.add_argument(
-        "--format",
-        choices=["table", "json"],
-        default="table",
-        help="Output format (default: table)",
-    )
-
-    # Show command (non-interactive)
-    show_parser = subparsers.add_parser(
-        "show", help="Show paper details non-interactively (for AI agents/scripts)"
-    )
-    show_parser.add_argument("directory", help="Project directory")
-    show_parser.add_argument("--id", help="Paper ID")
-    show_parser.add_argument("--doi", help="Paper DOI")
-    show_parser.add_argument("--title", help="Paper title (exact or partial match)")
-    show_parser.add_argument(
-        "--format", choices=["text", "json"], default="text", help="Output format (default: text)"
-    )
-
-    # Set-status command (non-interactive)
-    set_status_parser = subparsers.add_parser(
-        "set-status", help="Set paper status non-interactively (for AI agents/scripts)"
-    )
-    set_status_parser.add_argument("directory", help="Project directory")
-    set_status_parser.add_argument("--id", help="Paper ID")
-    set_status_parser.add_argument("--doi", help="Paper DOI")
-    set_status_parser.add_argument(
-        "--status",
-        required=True,
-        choices=["pending", "included", "excluded"],
-        help="New status",
-    )
-    set_status_parser.add_argument("--notes", help="Review notes")
-
-    # Stats command (non-interactive)
-    stats_parser = subparsers.add_parser(
-        "stats", help="Show project statistics non-interactively (for AI agents/scripts)"
-    )
-    stats_parser.add_argument("directory", help="Project directory")
-    stats_parser.add_argument(
-        "--format", choices=["text", "json"], default="text", help="Output format (default: text)"
-    )
-
-    # Update citations command
-    update_citations_parser = subparsers.add_parser(
-        "update-citations", help="Update citation counts from Google Scholar"
-    )
-    update_citations_parser.add_argument("directory", help="Project directory")
-    update_citations_parser.add_argument(
-        "--status",
-        choices=["pending", "included", "excluded"],
-        help="Only update papers with this status",
-    )
-    update_citations_parser.add_argument(
-        "--delay",
-        type=float,
-        default=5.0,
-        help="Delay between Google Scholar requests in seconds (default: 5.0)",
-    )
-
-    # Parse PDFs command
-    parse_pdfs_parser = subparsers.add_parser(
-        "parse-pdfs", help="Parse PDFs in pdfs/ folder and attach references to papers"
-    )
-    parse_pdfs_parser.add_argument("directory", help="Project directory")
-
-    # Set research question command
-    set_rq_parser = subparsers.add_parser(
-        "set-rq", help="Set or update the research question for relevance scoring"
-    )
-    set_rq_parser.add_argument("directory", help="Project directory")
-    set_rq_parser.add_argument("question", help="Research question text")
-
-    # Compute relevance command
-    relevance_parser = subparsers.add_parser(
-        "compute-relevance", help="Compute relevance scores for papers against the research question"
-    )
-    relevance_parser.add_argument("directory", help="Project directory")
-    relevance_parser.add_argument(
-        "--method",
-        choices=["tfidf", "llm"],
-        default="tfidf",
-        help="Scoring method: tfidf (fast, offline) or llm (OpenAI API, requires OPENAI_API_KEY)"
-    )
-    relevance_parser.add_argument(
-        "--model",
-        default="gpt-4o-mini",
-        help="LLM model to use (default: gpt-4o-mini)"
-    )
-    relevance_parser.add_argument(
-        "--status",
-        choices=["pending", "included", "excluded"],
-        help="Only score papers with this status"
-    )
-
-    args = parser.parse_args()
-
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
-
-    # Dispatch to appropriate handler
-    if args.command == "init":
-        init_project(args)
-    elif args.command == "add-seed":
-        add_seed(args)
-    elif args.command == "snowball":
-        run_snowball(args)
-    elif args.command == "review":
-        review(args)
-    elif args.command == "export":
-        export_results(args)
-    elif args.command == "list":
-        list_papers(args)
-    elif args.command == "show":
-        show_paper(args)
-    elif args.command == "set-status":
-        set_status(args)
-    elif args.command == "stats":
-        show_stats(args)
-    elif args.command == "update-citations":
-        update_citations(args)
-    elif args.command == "parse-pdfs":
-        parse_pdfs(args)
-    elif args.command == "set-rq":
-        set_research_question(args)
-    elif args.command == "compute-relevance":
-        compute_relevance(args)
+    app()
 
 
 if __name__ == "__main__":
