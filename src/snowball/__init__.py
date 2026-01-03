@@ -102,9 +102,14 @@ from .scoring.tfidf_scorer import TFIDFScorer
 try:
     from .scoring.llm_scorer import LLMScorer
     _has_llm_scorer = True
-except ImportError:
-    LLMScorer = None  # type: ignore
-    _has_llm_scorer = False
+except ImportError as e:
+    # Only catch missing openai package, re-raise other errors
+    if "openai" in str(e):
+        LLMScorer = None  # type: ignore
+        _has_llm_scorer = False
+    else:
+        # Re-raise if it's a different import error
+        raise
 
 # Visualization
 from .visualization import generate_citation_graph
