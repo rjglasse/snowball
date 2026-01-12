@@ -274,7 +274,7 @@ class TestCLIMain:
         # Typer returns 2 for missing required command (which is correct behavior for usage errors)
         # The help text should be shown
         assert result.exit_code == 2
-        assert "Usage:" in result.stdout
+        assert "Usage:" in result.output
 
     def test_main_init_command(self):
         """Test main dispatches to init command."""
