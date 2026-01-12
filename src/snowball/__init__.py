@@ -175,3 +175,21 @@ __all__ = [
 # Add LLMScorer to __all__ if available
 if _has_llm_scorer:
     __all__.append("LLMScorer")
+
+
+def register_commands(parent_app):
+    """Register snowball commands with a parent Typer app.
+
+    This function is called by the scholar CLI to add snowball as a subcommand.
+    Usage: scholar snowball <command>
+
+    Args:
+        parent_app: The parent Typer application to register commands with.
+    """
+    from snowball.cli import app as snowball_app
+
+    parent_app.add_typer(
+        snowball_app,
+        name="snowball",
+        help="Systematic literature review using snowballing.",
+    )
