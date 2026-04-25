@@ -206,7 +206,7 @@ class APIAggregator:
         if "google_scholar" in self.clients and paper.title:
             try:
                 # Google Scholar returns dicts, convert to Paper objects
-                gs_limit = min(limit, 50)  # Limit GS to 50 due to rate limiting
+                gs_limit = min(limit, 20)  # Keep Scholar fallback batches deliberately small.
                 gs_citations = self.clients["google_scholar"].get_citations(
                     paper.title, gs_limit
                 )

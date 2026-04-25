@@ -8,6 +8,7 @@ Quick reference for CLI commands and TUI keyboard shortcuts.
 
 ```bash
 # Initialize a new project
+snowball tui [project-dir]    # TUI setup: create/open project, add seeds, review
 snowball init <project-dir> [options]
   --name "Project Name"
   --description "Description"
@@ -17,6 +18,7 @@ snowball init <project-dir> [options]
 
 # Add seed papers
 snowball add-seed <project-dir> --pdf paper1.pdf paper2.pdf
+  --extract llm|grobid       # default llm; failed PDF extraction copies to pdfs/inbox/
 snowball add-seed <project-dir> --doi "10.1234/example"
 ```
 
@@ -30,6 +32,9 @@ snowball snowball <project-dir> [options]
   --direction forward         # Citations only
   --direction both            # Both (default)
   --force                     # Bypass pending paper check
+  --use-scholar               # Optional Google Scholar fallback
+  --scholar-proxy URL         # Optional explicit Scholar proxy
+  --scholar-free-proxy        # Optional rotating free proxies
 ```
 
 ### Review & Export
@@ -37,6 +42,7 @@ snowball snowball <project-dir> [options]
 ```bash
 # Launch interactive TUI
 snowball review <project-dir>
+snowball tui [project-dir]
 
 # Export results
 snowball export <project-dir> [options]
@@ -51,7 +57,9 @@ snowball export <project-dir> [options]
 # Update citation counts from Google Scholar
 snowball update-citations <project-dir>
   --status pending|included|excluded
-  --delay 5                   # Seconds between requests
+  --delay 15                  # Seconds between requests
+  --scholar-proxy URL         # Optional explicit proxy
+  --scholar-free-proxy        # Optional rotating free proxies
 
 # Set research question
 snowball set-rq <project-dir> "Your research question"
@@ -64,6 +72,7 @@ snowball compute-relevance <project-dir>
 
 # Parse PDFs and match to papers
 snowball parse-pdfs <project-dir>
+  --extract llm|grobid       # default llm; scans pdfs/ and pdfs/inbox/
 ```
 
 ### Scripting & Automation
@@ -139,7 +148,7 @@ snowball stats <project-dir>
 | `x` | Export (BibTeX, CSV, TikZ, PNG) |
 | `f` | Cycle filter: All → Pending → Included → Excluded |
 | `g` | Generate citation network graph |
-| `P` | Parse PDFs in pdfs/inbox/ (Shift+P) |
+| `P` | Parse PDFs in pdfs/ and pdfs/inbox/ (Shift+P) |
 | `R` | Compute relevance scores (Shift+R) |
 
 ### Other
@@ -157,7 +166,7 @@ snowball stats <project-dir>
 # Add to ~/.bashrc or ~/.zshrc
 export SEMANTIC_SCHOLAR_API_KEY="your-key"
 export SNOWBALL_EMAIL="your@email.com"
-export OPENAI_API_KEY="sk-..."  # For LLM relevance scoring
+export OPENAI_API_KEY="sk-..."  # For default LLM PDF extraction and LLM relevance scoring
 ```
 
 ---
@@ -201,7 +210,7 @@ snowball export my-slr --format all --included-only
 | Title | Paper title (truncated) |
 | Year | Publication year (red if outside filter range) |
 | Rel | Relevance score (0.00-1.00, green=high) |
-| Refs | GROBID-extracted reference count |
+| Refs | Extracted reference count |
 | Cite | Citation count from APIs |
 | Obs | Observation count (times discovered) |
 | Source | Seed / Bkd (backward) / Fwd (forward) |

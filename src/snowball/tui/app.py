@@ -6,21 +6,16 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote_plus
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, ScrollableContainer
+from textual.containers import Horizontal, ScrollableContainer
 from textual.coordinate import Coordinate
 from textual.widgets import (
     Header,
     Footer,
     DataTable,
     Static,
-    Button,
-    Label,
-    TextArea,
-    Select,
     Input,
 )
 from textual.binding import Binding
-from textual.screen import ModalScreen
 from textual.worker import Worker, WorkerState
 
 from ..models import Paper, PaperStatus, ReviewProject
@@ -30,6 +25,18 @@ from ..exporters.bibtex import BibTeXExporter
 from ..exporters.csv_exporter import CSVExporter
 from ..exporters.tikz import TikZExporter
 from ..parsers.pdf_parser import PDFParser
+from ..services import (
+    ProjectContext,
+    parse_project_pdfs,
+    run_snowball_iteration_checked,
+)
+from .dialogs import (
+    MetadataMismatchDialog,
+    PDFChooserDialog,
+    RelevanceMethodDialog,
+    ReviewDialog,
+)
+from .setup import ProjectSetupApp
 from ..paper_utils import (
     get_status_value,
     get_source_value,
@@ -38,227 +45,6 @@ from ..paper_utils import (
     truncate_title,
     titles_match,
 )
-
-
-class ReviewDialog(ModalScreen[Optional[tuple]]):
-    """Modal dialog for reviewing a paper."""
-
-    def __init__(self, paper: Paper):
-        super().__init__()
-        self.paper = paper
-
-    def compose(self) -> ComposeResult:
-        with Container(id="review-dialog"):
-            yield Label(f"Review: {truncate_title(self.paper.title)}")
-            yield Label("\nStatus:")
-            yield Select(
-                [
-                    ("Include", "included"),
-                    ("Exclude", "excluded"),
-                    ("Keep Pending", "pending"),
-                ],
-                value=get_status_value(self.paper.status),
-                id="status-select",
-            )
-            yield Label("\nNotes:")
-            yield TextArea(self.paper.notes or "", id="notes-input")
-            with Horizontal():
-                yield Button("Save", variant="primary", id="save-btn")
-                yield Button("Cancel", variant="default", id="cancel-btn")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "save-btn":
-            status_widget = self.query_one("#status-select", Select)
-            notes_widget = self.query_one("#notes-input", TextArea)
-
-            status = status_widget.value
-            notes = notes_widget.text
-
-            self.dismiss((status, notes))
-        else:
-            self.dismiss(None)
-
-
-class MetadataMismatchDialog(ModalScreen[Optional[dict]]):
-    """Dialog to show metadata mismatches and let user approve/reject changes."""
-
-    # Use unique prefix to avoid catching events from other buttons
-    BUTTON_PREFIX = "mismatch-"
-
-    def __init__(self, mismatches: list[tuple[str, str, str]], doi: str = None):
-        """Initialize with list of (field_name, current_value, api_value) tuples."""
-        super().__init__()
-        self.mismatches = mismatches
-        self.doi = doi
-        # Note: Can't use "selections" as it conflicts with Textual's Screen.selections
-        self.field_choices: dict[str, bool] = {m[0]: False for m in mismatches}
-
-    def compose(self) -> ComposeResult:
-        with Container(id="mismatch-dialog"):
-            yield Label("[bold #d29922]Metadata Mismatch Detected[/bold #d29922]\n")
-
-            if self.doi:
-                yield Label(f"[dim]DOI: {self.doi}[/dim]")
-                yield Label("The DOI lookup returned different values than the PDF/current data.")
-                yield Label("[dim]Note: PDF extraction (GROBID) can be imperfect. If you have a DOI,[/dim]")
-                yield Label("[dim]the API values are likely more accurate.[/dim]\n")
-            else:
-                yield Label("The API returned different values. Compare and choose:\n")
-
-            for field, current, api_val in self.mismatches:
-                yield Label(f"[bold]{field}:[/bold]")
-                current_display = current[:100] + ('...' if len(current) > 100 else '')
-                api_display = api_val[:100] + ('...' if len(api_val) > 100 else '')
-                yield Label(f"  [dim]PDF/Current:[/dim] {current_display}")
-                yield Label(f"  [#58a6ff]API/DOI:[/#58a6ff] {api_display}")
-                yield Button(f"Use API {field}", id=f"{self.BUTTON_PREFIX}update-{field}", variant="primary")
-                yield Label("")  # Spacer
-
-            with Horizontal():
-                yield Button("Keep Current", variant="default", id=f"{self.BUTTON_PREFIX}done")
-                if self.doi:
-                    yield Button("Trust DOI (Update All)", variant="success", id=f"{self.BUTTON_PREFIX}update-all")
-                else:
-                    yield Button("Use All API Values", variant="warning", id=f"{self.BUTTON_PREFIX}update-all")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        button_id = event.button.id
-        if not button_id or not button_id.startswith(self.BUTTON_PREFIX):
-            return  # Not our button
-
-        # Stop event propagation
-        event.stop()
-
-        # Strip prefix to get the action
-        action = button_id[len(self.BUTTON_PREFIX):]
-
-        if action == "done":
-            self.dismiss(self.field_choices)
-        elif action == "update-all":
-            for field, _, _ in self.mismatches:
-                self.field_choices[field] = True
-            self.dismiss(self.field_choices)
-        elif action.startswith("update-"):
-            field = action[7:]  # Remove "update-" prefix
-            self.field_choices[field] = True
-            self.dismiss(self.field_choices)
-
-
-class PDFChooserDialog(ModalScreen[Optional[str]]):
-    """Dialog to choose a PDF file to link to the current paper."""
-
-    BUTTON_PREFIX = "pdf-"
-
-    def __init__(
-        self,
-        pdf_files: list[Path],
-        current_pdf: Optional[str] = None,
-        inbox_dir: Optional[Path] = None,
-    ):
-        """Initialize with list of available PDF files.
-
-        Args:
-            pdf_files: List of PDF file paths
-            current_pdf: Currently linked PDF path (if any)
-            inbox_dir: Path to inbox directory (to identify unmatched PDFs)
-        """
-        super().__init__()
-        self.pdf_files = pdf_files
-        self.current_pdf = current_pdf
-        self.inbox_dir = inbox_dir
-
-    def compose(self) -> ComposeResult:
-        with Container(id="pdf-dialog"):
-            yield Label("[bold #58a6ff]Link PDF to Paper[/bold #58a6ff]\n")
-
-            if self.current_pdf:
-                yield Label(f"[dim]Currently linked:[/dim] {Path(self.current_pdf).name}")
-                yield Button("Clear link", id=f"{self.BUTTON_PREFIX}clear", variant="error")
-                yield Label("")
-
-            if not self.pdf_files:
-                yield Label("[dim]No PDFs in pdfs/ or pdfs/inbox/[/dim]")
-            else:
-                yield Label(f"[dim]Available PDFs ({len(self.pdf_files)}):[/dim]\n")
-
-                # Show scrollable list of PDFs
-                with ScrollableContainer(id="pdf-list"):
-                    for idx, pdf_path in enumerate(self.pdf_files):
-                        name = pdf_path.name
-                        # Check if this is an inbox PDF
-                        is_inbox = self.inbox_dir and pdf_path.parent == self.inbox_dir
-                        # Truncate long names, add inbox indicator
-                        max_len = 50 if is_inbox else 60
-                        display_name = name if len(name) <= max_len else name[:max_len - 3] + "..."
-                        if is_inbox:
-                            display_name = f"[new] {display_name}"
-                        yield Button(
-                            display_name,
-                            id=f"{self.BUTTON_PREFIX}select-{idx}",
-                            variant="primary" if str(pdf_path) == self.current_pdf else "default",
-                        )
-
-            yield Label("")
-            yield Button("Cancel", id=f"{self.BUTTON_PREFIX}cancel", variant="default")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        button_id = event.button.id
-        if not button_id or not button_id.startswith(self.BUTTON_PREFIX):
-            return
-
-        event.stop()
-        action = button_id[len(self.BUTTON_PREFIX):]
-
-        if action == "cancel":
-            self.dismiss(None)
-        elif action == "clear":
-            self.dismiss("")  # Empty string means clear the link
-        elif action.startswith("select-"):
-            try:
-                idx = int(action[7:])  # Remove "select-" prefix
-                if 0 <= idx < len(self.pdf_files):
-                    self.dismiss(str(self.pdf_files[idx]))
-                    return
-            except ValueError:
-                pass
-            self.dismiss(None)
-
-
-class RelevanceMethodDialog(ModalScreen[Optional[str]]):
-    """Dialog to choose relevance scoring method."""
-
-    BUTTON_PREFIX = "rel-"
-
-    def compose(self) -> ComposeResult:
-        with Container(id="relevance-dialog"):
-            yield Label("[bold #58a6ff]Compute Relevance Scores[/bold #58a6ff]\n")
-            yield Label("[dim]Choose scoring method:[/dim]\n")
-
-            yield Button(
-                "TF-IDF (fast, offline)",
-                id=f"{self.BUTTON_PREFIX}tfidf",
-                variant="primary",
-            )
-            yield Button(
-                "LLM (OpenAI API)",
-                id=f"{self.BUTTON_PREFIX}llm",
-                variant="default",
-            )
-            yield Label("")
-            yield Button("Cancel", id=f"{self.BUTTON_PREFIX}cancel", variant="default")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        button_id = event.button.id
-        if not button_id or not button_id.startswith(self.BUTTON_PREFIX):
-            return
-
-        event.stop()
-        action = button_id[len(self.BUTTON_PREFIX):]
-
-        if action == "cancel":
-            self.dismiss(None)
-        elif action in ("tfidf", "llm"):
-            self.dismiss(action)
 
 
 class SnowballApp(App):
@@ -560,12 +346,14 @@ class SnowballApp(App):
         storage: JSONStorage,
         engine: SnowballEngine,
         project: ReviewProject,
+        extraction_method: str = "llm",
     ):
         super().__init__()
         self.project_dir = project_dir
         self.storage = storage
         self.engine = engine
         self.project = project
+        self.extraction_method = extraction_method
         self.current_paper: Optional[Paper] = None
 
         # Sort state tracking (default: Status ascending for review workflow)
@@ -745,7 +533,7 @@ class SnowballApp(App):
             # Observation count
             obs_count = str(paper.observation_count) if paper.observation_count > 1 else ""
 
-            # GROBID references count
+            # Extracted references count
             grobid_refs = paper.raw_data.get("grobid_references", []) if paper.raw_data else []
             refs_count = str(len(grobid_refs)) if grobid_refs else ""
 
@@ -812,6 +600,7 @@ class SnowballApp(App):
         else:
             filter_text = "[bold]Filter:[/bold] All"
 
+        extract_label = self._extraction_label()
         stats_line = (
             f"[bold #58a6ff]{self.project.name}[/bold #58a6ff] [dim]│[/dim] "
             f"[bold]Total:[/bold] [#58a6ff]{total}[/#58a6ff] [dim]│[/dim] "
@@ -819,7 +608,8 @@ class SnowballApp(App):
             f"[#f85149]✗ {excluded}[/#f85149] [dim]│[/dim] "
             f"[#d29922]? {pending}[/#d29922] [dim]│[/dim] "
             f"{filter_text} [dim]│[/dim] "
-            f"[bold]Iter:[/bold] [#a371f7]{self.project.current_iteration}[/#a371f7]"
+            f"[bold]Iter:[/bold] [#a371f7]{self.project.current_iteration}[/#a371f7] "
+            f"[dim]│[/dim] [bold]Extract:[/bold] [#8b949e]{extract_label}[/#8b949e]"
         )
 
         # Add research question on second line if set
@@ -831,6 +621,15 @@ class SnowballApp(App):
             stats_line += f"\n[bold]RQ:[/bold] [dim italic]{rq}[/dim italic]"
 
         return stats_line
+
+    def _extraction_label(self) -> str:
+        """Format the active PDF extraction mode for compact display."""
+        labels = {
+            "llm": "LLM",
+            "grobid": "GROBID",
+            "python": "Python",
+        }
+        return labels.get(self.extraction_method, self.extraction_method)
 
     def _format_paper_details(self, paper: Paper) -> str:
         """Format paper details as rich text using shared function."""
@@ -1226,8 +1025,8 @@ class SnowballApp(App):
                 }
 
                 def do_parse() -> dict:
-                    """Parse the linked PDF with GROBID in background."""
-                    pdf_parser = PDFParser()
+                    """Parse the linked PDF in background."""
+                    pdf_parser = PDFParser(extraction_method=self.extraction_method)
                     try:
                         parse_result = pdf_parser.parse(Path(final_path))
                         return {
@@ -1250,6 +1049,12 @@ class SnowballApp(App):
 
     def action_snowball(self) -> None:
         """Run a snowball iteration."""
+        can_start, reason = self.engine.can_start_iteration(self.project)
+        if not can_start:
+            self.notify(reason, title="Snowball blocked", severity="warning")
+            self._log_event(f"[#d29922]Snowball blocked:[/#d29922] {reason}")
+            return
+
         # Store context
         old_count = len(self.storage.load_all_papers())
         self._worker_context["snowball"] = {"old_count": old_count}
@@ -1259,8 +1064,17 @@ class SnowballApp(App):
 
         def do_snowball() -> dict:
             """Run snowball in background thread."""
-            result = self.engine.run_snowball_iteration(self.project)
-            return result
+            context = ProjectContext(
+                self.project_dir,
+                self.storage,
+                self.project,
+                self.engine,
+                self.extraction_method,
+            )
+            result = run_snowball_iteration_checked(context)
+            if not result.can_start:
+                return {"blocked_reason": result.blocked_reason}
+            return result.stats
 
         self.run_worker(do_snowball, name="snowball", thread=True)
 
@@ -1269,6 +1083,11 @@ class SnowballApp(App):
         ctx = self._worker_context.get("snowball", {})
         old_count = ctx.get("old_count", 0)
         worker_result = ctx.get("worker_result", {})
+        if isinstance(worker_result, dict) and worker_result.get("blocked_reason"):
+            reason = worker_result["blocked_reason"]
+            self.notify(reason, title="Snowball blocked", severity="warning")
+            self._log_event(f"[#d29922]Snowball blocked:[/#d29922] {reason}")
+            return
 
         self.project = self.storage.load_project()
         new_count = len(self.storage.load_all_papers())
@@ -1277,6 +1096,8 @@ class SnowballApp(App):
         # Get merged papers from result
         merged_papers = worker_result.get("merged_papers", []) if isinstance(worker_result, dict) else []
         merged_count = len(merged_papers)
+        reference_errors = worker_result.get("reference_errors", 0) if isinstance(worker_result, dict) else 0
+        citation_errors = worker_result.get("citation_errors", 0) if isinstance(worker_result, dict) else 0
 
         self._refresh_table()
 
@@ -1296,6 +1117,12 @@ class SnowballApp(App):
         else:
             self.notify("No new papers found", title="Snowball complete", severity="warning")
             self._log_event(f"[#a371f7]Snowball:[/#a371f7] iteration {self.project.current_iteration}, no new papers")
+
+        if reference_errors or citation_errors:
+            self._log_event(
+                "[#d29922]Snowball source errors:[/#d29922] "
+                f"references={reference_errors}, citations={citation_errors}"
+            )
 
     def action_export(self) -> None:
         """Export papers to BibTeX, CSV, TikZ, and PNG graph."""
@@ -1418,60 +1245,44 @@ class SnowballApp(App):
         pdfs_dir.mkdir(exist_ok=True)
         inbox_dir.mkdir(exist_ok=True)
 
-        pdf_files = list(inbox_dir.glob("*.pdf"))
+        inbox_files = sorted(inbox_dir.glob("*.pdf"))
+        project_pdf_files = sorted(pdfs_dir.glob("*.pdf"))
+        pdf_files = inbox_files + project_pdf_files
         if not pdf_files:
-            self.notify("No PDFs in pdfs/inbox/ folder", severity="warning")
+            self.notify("No PDFs in pdfs/ or pdfs/inbox/ folder", severity="warning")
             return
 
         # Store context
         self._worker_context["parse_pdfs"] = {"pdf_files": pdf_files, "pdfs_dir": pdfs_dir}
 
         # Show working notification
-        self.notify(f"Parsing {len(pdf_files)} PDFs from inbox...", timeout=60)
+        self.notify(
+            f"Parsing {len(pdf_files)} PDFs with {self._extraction_label()} extraction...",
+            timeout=60,
+        )
 
         def do_parse() -> dict:
             """Parse PDFs in background thread."""
-            import shutil
-            all_papers = self.storage.load_all_papers()
-            pdf_parser = PDFParser()
-
-            processed = 0
-            no_match = 0
-
-            for pdf_path in pdf_files:
-                try:
-                    result = pdf_parser.parse(pdf_path)
-                    if not result.title:
-                        no_match += 1
-                        continue
-
-                    # Find matching paper by title (fuzzy match)
-                    matched_paper = self._find_paper_by_title_fuzzy(all_papers, result.title)
-
-                    if matched_paper:
-                        # Move PDF from inbox to pdfs/
-                        new_path = pdfs_dir / pdf_path.name
-                        shutil.move(str(pdf_path), str(new_path))
-
-                        # Store references
-                        if result.references:
-                            if matched_paper.raw_data is None:
-                                matched_paper.raw_data = {}
-                            matched_paper.raw_data["grobid_references"] = result.references
-
-                        matched_paper.pdf_path = str(new_path)
-                        self.storage.save_paper(matched_paper)
-                        processed += 1
-                    else:
-                        no_match += 1
-
-                except Exception:
-                    no_match += 1  # Count failed parses as no match
-
-            # Store results in context for handler
-            self._worker_context["parse_pdfs"]["processed"] = processed
-            self._worker_context["parse_pdfs"]["no_match"] = no_match
-            return {"processed": processed, "no_match": no_match}
+            context = ProjectContext(
+                self.project_dir,
+                self.storage,
+                self.project,
+                self.engine,
+                self.extraction_method,
+            )
+            result = parse_project_pdfs(
+                context,
+                extraction_method=self.extraction_method,
+            )
+            self._worker_context["parse_pdfs"]["processed"] = result.processed
+            self._worker_context["parse_pdfs"]["no_match"] = result.no_match
+            self._worker_context["parse_pdfs"]["failed"] = result.failed
+            self._worker_context["parse_pdfs"]["warnings"] = result.warnings
+            return {
+                "processed": result.processed,
+                "no_match": result.no_match,
+                "failed": result.failed,
+            }
 
         self.run_worker(do_parse, name="parse_pdfs", thread=True)
 
@@ -1480,16 +1291,23 @@ class SnowballApp(App):
         ctx = self._worker_context.get("parse_pdfs", {})
         processed = ctx.get("processed", 0)
         no_match = ctx.get("no_match", 0)
+        failed = ctx.get("failed", 0)
+        warnings = ctx.get("warnings", [])
 
         self._refresh_table()
 
-        if processed > 0 or no_match > 0:
+        for warning in warnings:
+            self._log_event(f"[#d29922]PDF parse warning:[/#d29922] {warning}")
+
+        if processed > 0 or no_match > 0 or failed > 0:
             self.notify(
-                f"Matched: {processed}, No match: {no_match}",
+                f"Matched: {processed}, No match: {no_match}, Failed: {failed}",
                 title="Parse complete",
                 severity="information" if processed > 0 else "warning"
             )
-            self._log_event(f"[#58a6ff]PDF parse:[/#58a6ff] matched {processed}, unmatched {no_match}")
+            self._log_event(
+                f"[#58a6ff]PDF parse:[/#58a6ff] matched {processed}, unmatched {no_match}, failed {failed}"
+            )
         else:
             self.notify("No new PDFs to process", severity="information")
 
@@ -1892,10 +1710,10 @@ class SnowballApp(App):
 
 [bold]Project Actions:[/bold]
   s           Run snowball iteration
-  x           Export papers (BibTeX + CSV)
+  x           Export papers (BibTeX + CSV + TikZ + PNG)
   f           Filter papers (cycles: all → pending → included → excluded)
   g           Generate citation graph (600 DPI PNG)
-  P           Parse PDFs in pdfs/ folder (Shift+P)
+  P           Parse PDFs in pdfs/ and pdfs/inbox/ (Shift+P)
 
 [bold]Other:[/bold]
   Ctrl+P      Command palette
@@ -1918,8 +1736,28 @@ Press any key to close this help.
 
 
 def run_tui(
-    project_dir: Path, storage: JSONStorage, engine: SnowballEngine, project: ReviewProject
+    project_dir: Path,
+    storage: JSONStorage,
+    engine: SnowballEngine,
+    project: ReviewProject,
+    extraction_method: str = "llm",
 ) -> None:
     """Run the TUI application."""
-    app = SnowballApp(project_dir, storage, engine, project)
+    app = SnowballApp(project_dir, storage, engine, project, extraction_method)
     app.run()
+
+
+def run_lifecycle_tui(initial_directory: Optional[Path] = None) -> None:
+    """Run the project setup TUI, then launch review when a project is selected."""
+    setup_app = ProjectSetupApp(initial_directory=initial_directory)
+    context = setup_app.run()
+    if context is None:
+        return
+
+    run_tui(
+        context.project_dir,
+        context.storage,
+        context.engine,
+        context.project,
+        context.extraction_method,
+    )

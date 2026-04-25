@@ -1,6 +1,7 @@
 """Tests for PDF parsing functionality."""
 
 import pytest
+from unittest.mock import MagicMock, patch
 
 from snowball.parsers.pdf_parser import PDFParser, PDFParseResult
 
@@ -33,14 +34,31 @@ class TestPDFParser:
     def test_init_without_grobid(self):
         """Test parser initialization without GROBID."""
         parser = PDFParser(use_grobid=False)
+        assert parser.extraction_method == "python"
         assert parser.grobid_available is False
 
-    def test_init_with_grobid_unavailable(self):
-        """Test parser initialization when GROBID is not available."""
-        # This should not raise an error even if GROBID is not running
-        parser = PDFParser(use_grobid=True, grobid_url="http://localhost:9999")
-        # Should have tried to check but found unavailable
+    def test_init_defaults_to_llm(self):
+        """Test parser initialization defaults to LLM extraction."""
+        parser = PDFParser(llm_api_key="test-key")
+        assert parser.extraction_method == "llm"
         assert parser.grobid_available is False
+
+    def test_init_with_grobid_extraction_unavailable(self):
+        """Test GROBID extraction initialization when GROBID is unavailable."""
+        parser = PDFParser(extraction_method="grobid", grobid_url="http://localhost:9999")
+        assert parser.extraction_method == "grobid"
+        assert parser.grobid_available is False
+
+    def test_init_with_llm_extraction_does_not_check_grobid(self):
+        """Test LLM extraction mode initialization."""
+        parser = PDFParser(extraction_method="llm", llm_api_key="test-key")
+        assert parser.extraction_method == "llm"
+        assert parser.grobid_available is False
+
+    def test_init_invalid_extraction_method(self):
+        """Test invalid extraction method validation."""
+        with pytest.raises(ValueError):
+            PDFParser(extraction_method="unknown")
 
 
 class TestPDFParserHeuristics:
@@ -175,6 +193,109 @@ class TestPDFParserHeuristics:
         
         references = parser._extract_references_heuristic(text)
         assert references == []
+
+
+class TestPDFParserLLMExtraction:
+    """Tests for LLM reference extraction helpers."""
+
+    @pytest.fixture
+    def parser(self):
+        """Create an LLM PDF parser instance."""
+        return PDFParser(extraction_method="llm", llm_api_key="test-key")
+
+    def test_extract_reference_section(self, parser):
+        """Test references section extraction from full text."""
+        text = """
+        Introduction
+        Body text.
+
+        References
+        [1] Smith, J. Test Paper. 2020.
+        [2] Doe, J. Another Paper. 2021.
+
+        Appendix
+        Extra material.
+        """
+
+        section = parser._extract_reference_section(text)
+
+        assert "Smith" in section
+        assert "Doe" in section
+        assert "Appendix" not in section
+
+    def test_extract_reference_section_uses_last_heading(self, parser):
+        """Test that the last references heading is used."""
+        text = """
+        Introduction
+        We discuss References in prose.
+
+        References
+        [1] Final Reference. 2020.
+        """
+
+        section = parser._extract_reference_section(text)
+
+        assert "Final Reference" in section
+        assert "Introduction" not in section
+
+    def test_parse_llm_references_response(self, parser):
+        """Test parsing structured LLM references JSON."""
+        content = """
+        ```json
+        [
+          {
+            "title": "First Paper",
+            "authors": ["Jane Smith", "John Doe"],
+            "year": "2020",
+            "doi": "10.1234/example.",
+            "raw": "Smith and Doe. First Paper. 2020."
+          },
+          {
+            "raw": "Unstructured Reference. 2021."
+          }
+        ]
+        ```
+        """
+
+        refs = parser._parse_llm_references_response(content)
+
+        assert refs[0]["title"] == "First Paper"
+        assert refs[0]["authors"] == ["Jane Smith", "John Doe"]
+        assert refs[0]["year"] == 2020
+        assert refs[0]["doi"] == "10.1234/example"
+        assert refs[1]["raw"] == "Unstructured Reference. 2021."
+
+    @patch("snowball.parsers.pdf_parser.shutil.which", return_value="/usr/bin/pdftotext")
+    @patch("snowball.parsers.pdf_parser.subprocess.run")
+    def test_extract_text_with_pdftotext(self, mock_run, mock_which, parser, tmp_path):
+        """Test pdftotext command integration."""
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF")
+
+        def write_output(args, check, capture_output, text):
+            output_path = args[-1]
+            with open(output_path, "w") as f:
+                f.write("Extracted text")
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        mock_run.side_effect = write_output
+
+        text = parser._extract_text_with_pdftotext(pdf_path)
+
+        assert text == "Extracted text"
+        mock_run.assert_called_once()
+
+    @patch("snowball.parsers.pdf_parser.shutil.which", return_value=None)
+    def test_extract_text_with_pdftotext_missing(self, mock_which, parser, tmp_path):
+        """Test missing pdftotext command handling."""
+        pdf_path = tmp_path / "paper.pdf"
+        pdf_path.write_bytes(b"%PDF")
+
+        with pytest.raises(RuntimeError):
+            parser._extract_text_with_pdftotext(pdf_path)
 
 
 class TestPDFParserTEIParsing:

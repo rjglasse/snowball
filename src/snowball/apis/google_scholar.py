@@ -6,6 +6,8 @@ from typing import Optional, Tuple, List
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_RATE_LIMIT_DELAY = 15.0
+
 
 class GoogleScholarClient:
     """Client for fetching citation counts from Google Scholar.
@@ -17,7 +19,7 @@ class GoogleScholarClient:
 
     def __init__(
         self,
-        rate_limit_delay: float = 2.0,
+        rate_limit_delay: float = DEFAULT_RATE_LIMIT_DELAY,
         proxy: Optional[str] = None,
         use_free_proxy: bool = False,
     ):
@@ -25,7 +27,8 @@ class GoogleScholarClient:
 
         Args:
             rate_limit_delay: Delay between requests in seconds.
-                              Default is 2 seconds to avoid rate limiting.
+                              Default is intentionally conservative because
+                              Google Scholar is scraped, not an official API.
             proxy: HTTP/HTTPS proxy URL (e.g., "http://user:pass@host:port")
             use_free_proxy: Use free rotating proxies via free-proxy library
         """
@@ -186,7 +189,7 @@ class GoogleScholarClient:
 
         return similarity >= threshold
 
-    def get_citations(self, title: str, limit: int = 50) -> List[dict]:
+    def get_citations(self, title: str, limit: int = 20) -> List[dict]:
         """Get papers that cite a given paper (forward citations).
 
         Args:

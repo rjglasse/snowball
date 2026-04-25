@@ -1,12 +1,21 @@
-"""PDF parsing with GROBID and fallback support."""
+"""PDF parsing with GROBID, LLM reference extraction, and fallback support."""
 
+import json
 import re
 import logging
+import os
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 import pypdfium2 as pdfium
 
 logger = logging.getLogger(__name__)
+
+EXTRACTION_METHODS = {"grobid", "llm", "python"}
+DEFAULT_LLM_MODEL = "gpt-4o-mini"
+MAX_REFERENCE_SECTION_CHARS = 50000
 
 
 class PDFParseResult:
@@ -26,18 +35,40 @@ class PDFParseResult:
 class PDFParser:
     """Parses academic PDFs to extract metadata and references."""
 
-    def __init__(self, use_grobid: bool = True, grobid_url: str = "http://localhost:8070"):
+    def __init__(
+        self,
+        use_grobid: bool = True,
+        grobid_url: str = "http://localhost:8070",
+        extraction_method: Optional[str] = None,
+        llm_model: str = DEFAULT_LLM_MODEL,
+        llm_api_key: Optional[str] = None,
+        llm_base_url: Optional[str] = None,
+    ):
         """Initialize the PDF parser.
 
         Args:
             use_grobid: Whether to attempt using GROBID
             grobid_url: URL of GROBID service
+            extraction_method: Reference extraction method: grobid, llm, or python.
+                               If omitted, defaults to llm unless use_grobid=False.
+            llm_model: OpenAI model to use when extraction_method is llm.
+            llm_api_key: OpenAI API key, defaults to OPENAI_API_KEY.
+            llm_base_url: Optional OpenAI-compatible API base URL.
         """
-        self.use_grobid = use_grobid
+        self.extraction_method = extraction_method or ("llm" if use_grobid else "python")
+        if self.extraction_method not in EXTRACTION_METHODS:
+            valid = ", ".join(sorted(EXTRACTION_METHODS))
+            raise ValueError(f"Invalid extraction_method '{self.extraction_method}'. Use one of: {valid}")
+
+        self.use_grobid = self.extraction_method == "grobid"
         self.grobid_url = grobid_url
+        self.llm_model = llm_model
+        self.llm_api_key = llm_api_key or os.environ.get("OPENAI_API_KEY")
+        self.llm_base_url = llm_base_url
+        self._openai_client = None
         self.grobid_available = False
 
-        if use_grobid:
+        if self.use_grobid:
             self.grobid_available = self._check_grobid_available()
 
     def _check_grobid_available(self) -> bool:
@@ -59,6 +90,10 @@ class PDFParser:
         Returns:
             PDFParseResult with extracted information
         """
+        if self.extraction_method == "llm":
+            logger.info(f"Parsing {pdf_path} with pdftotext and LLM reference extraction")
+            return self._parse_with_llm(pdf_path)
+
         if self.grobid_available:
             logger.info(f"Parsing {pdf_path} with GROBID")
             try:
@@ -68,6 +103,30 @@ class PDFParser:
 
         logger.info(f"Parsing {pdf_path} with Python parser")
         return self._parse_with_python(pdf_path)
+
+    @property
+    def openai_client(self):
+        """Lazy-load OpenAI client for LLM reference extraction."""
+        if not self.llm_api_key:
+            raise ValueError(
+                "OpenAI API key required for --extract llm. Set OPENAI_API_KEY."
+            )
+
+        if self._openai_client is None:
+            try:
+                from openai import OpenAI
+            except ImportError:
+                raise ImportError(
+                    "openai package required for LLM reference extraction. "
+                    "Install with: pip install snowball-slr[llm]"
+                )
+
+            kwargs = {"api_key": self.llm_api_key}
+            if self.llm_base_url:
+                kwargs["base_url"] = self.llm_base_url
+            self._openai_client = OpenAI(**kwargs)
+
+        return self._openai_client
 
     def _parse_with_grobid(self, pdf_path: Path) -> PDFParseResult:
         """Parse PDF using GROBID service."""
@@ -100,6 +159,165 @@ class PDFParser:
             result = self._parse_tei_xml(tei_xml)
 
         return result
+
+    def _parse_with_llm(self, pdf_path: Path) -> PDFParseResult:
+        """Parse PDF with pdftotext and extract references using an LLM."""
+        result = PDFParseResult()
+
+        try:
+            result.full_text = self._extract_text_with_pdftotext(pdf_path)
+        except Exception as e:
+            logger.error(f"pdftotext extraction failed: {e}")
+            return result
+
+        first_page = result.full_text.split("\f", 1)[0] if result.full_text else ""
+
+        title = self._extract_title_heuristic(first_page)
+        if title:
+            result.title = title
+
+        result.authors = self._extract_authors_heuristic(first_page)
+
+        year = self._extract_year_heuristic(first_page)
+        if year:
+            result.year = year
+
+        doi = self._extract_doi_heuristic(result.full_text)
+        if doi:
+            result.doi = doi
+
+        abstract = self._extract_abstract_heuristic(result.full_text)
+        if abstract:
+            result.abstract = abstract
+
+        ref_section = self._extract_reference_section(result.full_text)
+        if not ref_section:
+            logger.warning("Could not find a references section for LLM extraction")
+            result.references = []
+            return result
+
+        result.references = self._extract_references_with_llm(ref_section)
+        return result
+
+    def _extract_text_with_pdftotext(self, pdf_path: Path) -> str:
+        """Extract text from a PDF using the pdftotext command-line tool."""
+        if shutil.which("pdftotext") is None:
+            raise RuntimeError("pdftotext command not found. Install Poppler to use --extract llm.")
+
+        with tempfile.NamedTemporaryFile(suffix=".txt") as output:
+            completed = subprocess.run(
+                ["pdftotext", "-layout", str(pdf_path), output.name],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if completed.returncode != 0:
+                stderr = completed.stderr.strip() or "unknown error"
+                raise RuntimeError(f"pdftotext failed: {stderr}")
+
+            output.seek(0)
+            return output.read().decode("utf-8", errors="replace")
+
+    def _extract_reference_section(self, text: str) -> str:
+        """Return the likely references section from extracted PDF text."""
+        section_pattern = re.compile(
+            r'(?im)^\s*(references|bibliography|works cited)\s*$'
+        )
+        matches = list(section_pattern.finditer(text))
+        if not matches:
+            return ""
+
+        start = matches[-1].end()
+        section = text[start:]
+
+        stop_pattern = re.compile(
+            r'(?im)^\s*(appendix|acknowledg(e)?ments?|author biographies)\s*$'
+        )
+        stop = stop_pattern.search(section)
+        if stop:
+            section = section[:stop.start()]
+
+        return section.strip()[:MAX_REFERENCE_SECTION_CHARS]
+
+    def _extract_references_with_llm(self, reference_section: str) -> List[Dict[str, Any]]:
+        """Extract structured references from a references section using an LLM."""
+        prompt = f"""Extract the bibliography entries from this academic paper references section.
+
+Return ONLY valid JSON as an array of objects. Each object may contain:
+- title: string, if identifiable
+- authors: array of strings, if identifiable
+- year: integer, if identifiable
+- doi: string, if present
+- raw: string, the complete cleaned reference text
+
+Do not invent missing fields. Preserve every reference that appears in the section.
+
+References section:
+{reference_section}
+"""
+
+        response = self.openai_client.chat.completions.create(
+            model=self.llm_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=4000,
+            temperature=0,
+        )
+        content = response.choices[0].message.content.strip()
+        return self._parse_llm_references_response(content)
+
+    def _parse_llm_references_response(self, content: str) -> List[Dict[str, Any]]:
+        """Parse and normalize the LLM JSON response."""
+        content = content.strip()
+        if content.startswith("```"):
+            lines = content.splitlines()
+            content = "\n".join(
+                line for line in lines if not line.strip().startswith("```")
+            ).strip()
+
+        data = json.loads(content)
+        if not isinstance(data, list):
+            raise ValueError("LLM reference extraction returned non-list JSON")
+
+        references = []
+        for item in data[:200]:
+            if not isinstance(item, dict):
+                continue
+
+            ref = {}
+            title = item.get("title")
+            if isinstance(title, str) and title.strip():
+                ref["title"] = self._clean_text(title)
+
+            authors = item.get("authors")
+            if isinstance(authors, list):
+                cleaned_authors = [
+                    self._clean_text(author)
+                    for author in authors
+                    if isinstance(author, str) and author.strip()
+                ]
+                if cleaned_authors:
+                    ref["authors"] = cleaned_authors
+
+            year = item.get("year")
+            if isinstance(year, int):
+                ref["year"] = year
+            elif isinstance(year, str):
+                year_match = re.search(r'\b(19\d{2}|20\d{2})\b', year)
+                if year_match:
+                    ref["year"] = int(year_match.group(1))
+
+            doi = item.get("doi")
+            if isinstance(doi, str) and doi.strip():
+                ref["doi"] = doi.strip().rstrip(".,;")
+
+            raw = item.get("raw")
+            if isinstance(raw, str) and raw.strip():
+                ref["raw"] = self._clean_text(raw[:1000])
+
+            if ref:
+                references.append(ref)
+
+        return references
 
     def _clean_text(self, text: str) -> str:
         """Clean text of Unicode artifacts from PDF extraction.

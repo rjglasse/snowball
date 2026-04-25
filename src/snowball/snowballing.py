@@ -141,7 +141,10 @@ class SnowballEngine:
                 self.storage.load_paper(paper_id)
                 for paper_id in project.seed_paper_ids
             ]
-            source_papers = [p for p in all_seeds if p.status != PaperStatus.EXCLUDED]
+            source_papers = [
+                p for p in all_seeds
+                if p is not None and p.status != PaperStatus.EXCLUDED
+            ]
         else:
             # Get papers from previous iteration that were included
             all_papers = self.storage.get_papers_by_iteration(current_iter)
@@ -149,7 +152,14 @@ class SnowballEngine:
 
         if not source_papers:
             logger.warning(f"No source papers for iteration {next_iter}")
-            return {"added": 0, "backward": 0, "forward": 0}
+            return {
+                "added": 0,
+                "backward": 0,
+                "forward": 0,
+                "sources_processed": 0,
+                "reference_errors": 0,
+                "citation_errors": 0,
+            }
 
         logger.info(f"Processing {len(source_papers)} source papers")
 
@@ -173,10 +183,14 @@ class SnowballEngine:
 
         backward_count = 0
         forward_count = 0
+        sources_processed = 0
+        reference_errors = 0
+        citation_errors = 0
         merged_papers = []  # Track papers that were merged with existing ones
 
         # Process each source paper
         for source_paper in source_papers:
+            sources_processed += 1
             logger.info(f"Processing: {source_paper.title}")
 
             # Backward snowballing (references)
@@ -204,6 +218,7 @@ class SnowballEngine:
                             if existing:
                                 merged_papers.append(existing)
                 except Exception as e:
+                    reference_errors += 1
                     logger.error(f"Error getting references: {e}")
 
             # Forward snowballing (citations)
@@ -231,6 +246,7 @@ class SnowballEngine:
                             if existing:
                                 merged_papers.append(existing)
                 except Exception as e:
+                    citation_errors += 1
                     logger.error(f"Error getting citations: {e}")
 
         logger.info(f"Discovered {len(discovered_papers)} new papers, merged {len(merged_papers)} duplicates")
@@ -278,6 +294,9 @@ class SnowballEngine:
             "for_review": len(filtered_papers),
             "merged": len(merged_papers),
             "merged_papers": merged_papers,
+            "sources_processed": sources_processed,
+            "reference_errors": reference_errors,
+            "citation_errors": citation_errors,
         }
 
     def _get_references_for_paper(self, paper: Paper) -> List[Paper]:
@@ -563,20 +582,28 @@ class SnowballEngine:
     def update_citations_from_google_scholar(
         self,
         papers: Optional[List[Paper]] = None,
-        rate_limit_delay: float = 5.0
+        rate_limit_delay: float = 15.0,
+        proxy: Optional[str] = None,
+        use_free_proxy: bool = False,
     ) -> dict:
         """Update citation counts for papers using Google Scholar.
 
         Args:
             papers: List of papers to update. If None, updates all papers.
-            rate_limit_delay: Delay between Google Scholar requests (default 5s)
+            rate_limit_delay: Delay between Google Scholar requests.
+            proxy: Optional explicit HTTP/HTTPS proxy URL.
+            use_free_proxy: Use free rotating proxies via scholarly.
 
         Returns:
             Statistics about the update: {updated, failed, skipped}
         """
         from .apis.google_scholar import GoogleScholarClient
 
-        gs_client = GoogleScholarClient(rate_limit_delay=rate_limit_delay)
+        gs_client = GoogleScholarClient(
+            rate_limit_delay=rate_limit_delay,
+            proxy=proxy,
+            use_free_proxy=use_free_proxy,
+        )
 
         if papers is None:
             papers = self.storage.load_all_papers()

@@ -15,7 +15,13 @@ from .storage.json_storage import JSONStorage
 from .apis.aggregator import APIAggregator
 from .parsers.pdf_parser import PDFParser
 from .snowballing import SnowballEngine
-from .tui.app import run_tui
+from .services import (
+    ProjectContext,
+    copy_pdf_to_project,
+    parse_project_pdfs,
+    run_snowball_iteration_checked,
+)
+from .tui.app import run_lifecycle_tui, run_tui
 from .exporters.bibtex import BibTeXExporter
 from .exporters.csv_exporter import CSVExporter
 from .exporters.tikz import TikZExporter
@@ -85,6 +91,11 @@ class TextOrJsonFormat(str, Enum):
 
 class ScoringMethod(str, Enum):
     tfidf = "tfidf"
+    llm = "llm"
+
+
+class ExtractionMethod(str, Enum):
+    grobid = "grobid"
     llm = "llm"
 
 
@@ -171,6 +182,10 @@ def add_seed(
     doi: Annotated[Optional[List[str]], typer.Option(help="DOI(s) of seed paper(s)")] = None,
     s2_api_key: Annotated[Optional[str], typer.Option(help="Semantic Scholar API key")] = None,
     email: Annotated[Optional[str], typer.Option(help="Email for API polite pools")] = None,
+    extract: Annotated[
+        ExtractionMethod,
+        typer.Option("--extract", help="PDF reference extraction method"),
+    ] = ExtractionMethod.llm,
     no_grobid: Annotated[bool, typer.Option(help="Don't use GROBID for PDF parsing")] = False,
     use_scholar: Annotated[
         bool,
@@ -203,7 +218,8 @@ def add_seed(
     # Set up API and engine
     api_config = get_api_config(s2_api_key, email, use_scholar, scholar_proxy, scholar_free_proxy)
     api = APIAggregator(**api_config)
-    pdf_parser = PDFParser(use_grobid=not no_grobid)
+    extraction_method = "python" if no_grobid else extract.value
+    pdf_parser = PDFParser(extraction_method=extraction_method)
     engine = SnowballEngine(storage, api, pdf_parser)
 
     # Add seeds
@@ -213,7 +229,9 @@ def add_seed(
         import shutil
 
         pdfs_dir = project_dir / "pdfs"
+        inbox_dir = pdfs_dir / "inbox"
         pdfs_dir.mkdir(exist_ok=True)
+        inbox_dir.mkdir(exist_ok=True)
 
         for pdf_path in pdf:
             pdf_file = Path(pdf_path)
@@ -231,6 +249,9 @@ def add_seed(
                 logger.info(f"Added seed: {paper.title}")
                 logger.info(f"  PDF copied to: {dest_pdf}")
                 added_count += 1
+            else:
+                inbox_path = copy_pdf_to_project(pdf_file, inbox_dir)
+                logger.warning(f"  Could not add seed from PDF; copied to inbox: {inbox_path}")
 
     if doi:
         for doi_str in doi:
@@ -301,15 +322,28 @@ def snowball(
     iteration_count = 0
     while engine.should_continue_snowballing(project):
         # Check before each iteration (unless forcing)
+        context = ProjectContext(project_dir, storage, project, engine)
         if not force and iteration_count > 0:
-            can_start, reason = engine.can_start_iteration(project)
-            if not can_start:
-                logger.warning(reason)
+            result = run_snowball_iteration_checked(
+                context,
+                direction=direction.value,
+                force=force,
+            )
+            if not result.can_start:
+                logger.warning(result.blocked_reason)
                 break
-
-        logger.info(f"\nRunning snowball iteration {project.current_iteration + 1}...")
-
-        stats = engine.run_snowball_iteration(project, direction=direction.value)
+            stats = result.stats
+        else:
+            logger.info(f"\nRunning snowball iteration {project.current_iteration + 1}...")
+            result = run_snowball_iteration_checked(
+                context,
+                direction=direction.value,
+                force=force,
+            )
+            if not result.can_start:
+                logger.warning(result.blocked_reason)
+                break
+            stats = result.stats
 
         logger.info(f"Iteration {project.current_iteration} complete:")
         logger.info(f"  - Discovered: {stats['added']} papers")
@@ -317,6 +351,12 @@ def snowball(
         logger.info(f"  - Forward: {stats['forward']}")
         logger.info(f"  - Auto-excluded: {stats['auto_excluded']}")
         logger.info(f"  - For review: {stats['for_review']}")
+        if stats.get("reference_errors") or stats.get("citation_errors"):
+            logger.warning(
+                "  - Source errors: "
+                f"references={stats.get('reference_errors', 0)}, "
+                f"citations={stats.get('citation_errors', 0)}"
+            )
 
         # Reload project
         project = storage.load_project()
@@ -332,6 +372,17 @@ def snowball(
     logger.info("\nProject summary:")
     logger.info(f"  Total papers: {summary['total']}")
     logger.info(f"  By status: {summary['by_status']}")
+
+
+@app.command()
+def tui(
+    directory: Annotated[
+        Optional[str],
+        typer.Argument(help="Optional project directory to open in the setup TUI"),
+    ] = None,
+) -> None:
+    """Launch the project setup and review TUI."""
+    run_lifecycle_tui(Path(directory) if directory else None)
 
 
 @app.command()
@@ -801,8 +852,16 @@ def update_citations(
     ] = None,
     delay: Annotated[
         float,
-        typer.Option(help="Delay between Google Scholar requests in seconds (default: 5.0)"),
-    ] = 5.0,
+        typer.Option(help="Delay between Google Scholar requests in seconds (default: 15.0)"),
+    ] = 15.0,
+    scholar_proxy: Annotated[
+        Optional[str],
+        typer.Option(help="Proxy URL for Google Scholar (e.g., http://user:pass@host:port)"),
+    ] = None,
+    scholar_free_proxy: Annotated[
+        bool,
+        typer.Option(help="Use free rotating proxies for Google Scholar (requires free-proxy package)"),
+    ] = False,
 ) -> None:
     """Update citation counts from Google Scholar."""
     project_dir = Path(directory)
@@ -835,7 +894,12 @@ def update_citations(
         logger.info(f"Updating {len(papers)} papers with status '{status.value}'")
 
     # Run update
-    stats_result = engine.update_citations_from_google_scholar(papers=papers, rate_limit_delay=delay)
+    stats_result = engine.update_citations_from_google_scholar(
+        papers=papers,
+        rate_limit_delay=delay,
+        proxy=scholar_proxy,
+        use_free_proxy=scholar_free_proxy,
+    )
 
     logger.info(f"\nUpdate complete:")
     logger.info(f"  Total papers: {stats_result['total']}")
@@ -908,6 +972,10 @@ def _find_paper_by_title_fuzzy(papers: list, title: str, threshold: float = 0.8)
 @app.command("parse-pdfs")
 def parse_pdfs(
     directory: Annotated[str, typer.Argument(help="Project directory")],
+    extract: Annotated[
+        ExtractionMethod,
+        typer.Option("--extract", help="PDF reference extraction method"),
+    ] = ExtractionMethod.llm,
 ) -> None:
     """Parse PDFs in the pdfs/ folder and attach references to matching papers."""
     project_dir = Path(directory)
@@ -926,84 +994,43 @@ def parse_pdfs(
 
     # Check for pdfs directory
     pdfs_dir = project_dir / "pdfs"
+    inbox_dir = pdfs_dir / "inbox"
     if not pdfs_dir.exists():
         logger.info(f"Creating pdfs directory: {pdfs_dir}")
         pdfs_dir.mkdir(parents=True, exist_ok=True)
         logger.info("No PDFs found. Add PDF files to this folder.")
         return
+    inbox_dir.mkdir(exist_ok=True)
 
     # Find PDF files
-    pdf_files = list(pdfs_dir.glob("*.pdf"))
+    pdf_files = sorted(inbox_dir.glob("*.pdf")) + sorted(pdfs_dir.glob("*.pdf"))
     if not pdf_files:
-        logger.info("No PDF files found in pdfs/ directory.")
+        logger.info("No PDF files found in pdfs/ or pdfs/inbox/ directory.")
         logger.info("Add PDF files to parse references.")
         return
 
     logger.info(f"Found {len(pdf_files)} PDF files")
 
-    # Load all papers for title matching
-    all_papers = storage.load_all_papers()
-    logger.info(f"Loaded {len(all_papers)} papers for matching")
+    context = ProjectContext(
+        project_dir,
+        storage,
+        project,
+        SnowballEngine(storage, APIAggregator(use_apis=[])),
+        extract.value,
+    )
+    result = parse_project_pdfs(context, extraction_method=extract.value)
 
-    # Initialize parser
-    pdf_parser = PDFParser()
-    if not pdf_parser.grobid_available:
-        logger.warning("GROBID not available. Will use heuristic extraction (less accurate).")
-
-    # Process each PDF
-    processed = 0
-    no_match = 0
-    failed = 0
-
-    for pdf_path in pdf_files:
-        logger.info(f"Parsing: {pdf_path.name}")
-
-        try:
-            # Parse PDF to get title and references
-            result = pdf_parser.parse(pdf_path)
-
-            if not result.title:
-                logger.warning(f"  Could not extract title from PDF")
-                failed += 1
-                continue
-
-            logger.info(f"  Extracted title: {truncate_title(result.title, 60)}")
-
-            # Find matching paper by title
-            paper = _find_paper_by_title_fuzzy(all_papers, result.title)
-
-            if not paper:
-                logger.warning(f"  No matching paper found in project")
-                no_match += 1
-                continue
-
-            logger.info(f"  Matched to: {truncate_title(paper.title, 60)}")
-
-            # Store references
-            if result.references:
-                if paper.raw_data is None:
-                    paper.raw_data = {}
-                paper.raw_data["grobid_references"] = result.references
-                logger.info(f"  Extracted {len(result.references)} references")
-            else:
-                logger.warning(f"  No references extracted from PDF")
-
-            # Update paper
-            paper.pdf_path = str(pdf_path)
-            storage.save_paper(paper)
-
-            processed += 1
-
-        except Exception as e:
-            logger.error(f"  Failed to parse {pdf_path.name}: {e}")
-            failed += 1
+    for source, dest in result.moved_files:
+        logger.info(f"Moved PDF: {source.name} -> {dest.name}")
+    for warning in result.warnings:
+        logger.warning(warning)
 
     logger.info(f"\nParse complete:")
-    logger.info(f"  Matched and processed: {processed}")
-    logger.info(f"  No matching paper: {no_match}")
-    logger.info(f"  Failed to parse: {failed}")
+    logger.info(f"  Matched and processed: {result.processed}")
+    logger.info(f"  No matching paper: {result.no_match}")
+    logger.info(f"  Failed to parse: {result.failed}")
 
-    if processed > 0:
+    if result.processed > 0:
         logger.info("\nReferences will be used in the next snowball iteration.")
 
 

@@ -177,7 +177,9 @@ def temp_project_dir():
 @pytest.fixture
 def storage(temp_project_dir):
     """Create a JSONStorage instance with a temporary directory."""
-    return JSONStorage(temp_project_dir)
+    storage = JSONStorage(temp_project_dir)
+    yield storage
+    storage.shutdown()
 
 
 @pytest.fixture

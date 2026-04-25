@@ -1,6 +1,7 @@
 """JSON-based storage for papers and project data."""
 
 import json
+import logging
 import uuid
 import threading
 import queue
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import List, Optional, Dict
 from ..models import Paper, ReviewProject, PaperStatus
 from ..paper_utils import papers_are_duplicates
+
+logger = logging.getLogger(__name__)
 
 
 class JSONStorage:
@@ -57,10 +60,14 @@ class JSONStorage:
             try:
                 # Wait for items with timeout to check shutdown flag periodically
                 paper = self._write_queue.get(timeout=0.1)
-                self._write_paper_to_disk(paper)
-                self._write_queue.task_done()
             except queue.Empty:
                 continue
+            try:
+                self._write_paper_to_disk(paper)
+            except Exception as exc:
+                logger.warning("Failed to write paper %s: %s", paper.id, exc)
+            finally:
+                self._write_queue.task_done()
 
     def _write_paper_to_disk(self, paper: Paper) -> None:
         """Actually write a paper to disk (called from background thread)."""

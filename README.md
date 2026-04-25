@@ -11,7 +11,8 @@ A terminal-based tool for conducting Systematic Literature Reviews (SLR) using t
 - Start by adding seed papers (via PDF or DOI)
 - Review seed papers for inclusion (just in case)
 - Snowball backwards (via references), forwards (via citations) or both (optionally setting time period)
-  - [Grobid](https://github.com/kermitt2/grobid/) is used to extract references
+  - `pdftotext` plus an OpenAI-compatible LLM call is used to extract references by default
+  - `--extract grobid` can alternatively use [Grobid](https://github.com/kermitt2/grobid/)
   - APIs like [OpenAlex](https://openalex.org/) and [Semantic Scholar](https://www.semanticscholar.org/) are used to find citations
 - Review list of found papers for inclusion or exclusion
   - Simple keyboard shortcut interaction
@@ -24,6 +25,24 @@ A terminal-based tool for conducting Systematic Literature Reviews (SLR) using t
 ## Quick Start
 
 ### 1. Initialize a Project
+
+You can do the full setup in the TUI:
+
+```bash
+snowball tui
+```
+
+The setup TUI can create or open a project, add seed PDFs/DOIs, choose the PDF
+reference extraction mode, and then enter the review table.
+
+If you are running from a source checkout rather than an installed package, launch
+the current workspace version with:
+
+```bash
+PYTHONPATH=src uv run snowball tui
+```
+
+Or initialize from the CLI:
 
 ```bash
 snowball init my-slr-project \
@@ -40,7 +59,21 @@ From PDF files:
 snowball add-seed my-slr-project \
   --pdf seed1.pdf seed2.pdf \
   --email your.email@domain.com
+
+# Equivalent explicit LLM extraction mode
+OPENAI_API_KEY=... snowball add-seed my-slr-project \
+  --pdf seed1.pdf \
+  --extract llm
+
+# Alternative extraction with GROBID
+snowball add-seed my-slr-project \
+  --pdf seed1.pdf \
+  --extract grobid
 ```
+
+Successful seed PDFs are copied into `my-slr-project/pdfs/` and linked to the seed
+paper record. If seed extraction fails, the source PDF is still copied to
+`my-slr-project/pdfs/inbox/` so it can be parsed or linked later.
 
 From DOIs:
 ```bash
@@ -69,6 +102,9 @@ snowball snowball my-slr-project --direction forward
 
 # Both directions (default)
 snowball snowball my-slr-project --direction both
+
+# Optional Google Scholar fallback for forward snowballing
+snowball snowball my-slr-project --use-scholar --scholar-proxy http://user:pass@host:port
 ```
 
 This will:
@@ -82,6 +118,11 @@ This will:
 Launch the interactive TUI:
 ```bash
 snowball review my-slr-project
+```
+
+Or launch the lifecycle TUI with project setup controls:
+```bash
+snowball tui my-slr-project
 ```
 
 **Navigation:**
@@ -109,7 +150,7 @@ snowball review my-slr-project
 - `x`: Export results (BibTeX, CSV, TikZ, PNG)
 - `f`: Cycle filter (All → Pending → Included → Excluded)
 - `g`: Generate citation network graph
-- `P`: Parse PDFs in pdfs/inbox/ folder (Shift+P)
+- `P`: Parse PDFs in `pdfs/` and `pdfs/inbox/` (Shift+P)
 - `R`: Compute relevance scores (Shift+R)
 
 **Other:**
@@ -167,17 +208,25 @@ Snowball supports two PDF workflows:
 
 **Automatic matching (inbox):**
 ```bash
-# Place PDFs in pdfs/inbox/ folder
+# Place unmatched PDFs in pdfs/inbox/
 cp paper1.pdf paper2.pdf my-slr-project/pdfs/inbox/
 
-# Parse and auto-match by title
+# Parse project PDFs and auto-match by title.
+# Scans both pdfs/ and pdfs/inbox/.
 snowball parse-pdfs my-slr-project
+
+# Equivalent explicit LLM extraction mode
+OPENAI_API_KEY=... snowball parse-pdfs my-slr-project --extract llm
+
+# Use GROBID reference extraction instead
+snowball parse-pdfs my-slr-project --extract grobid
 # Matched PDFs are moved to pdfs/, unmatched stay in inbox/
 ```
 
 **Manual linking (TUI):**
 - Press `l` to link any PDF from pdfs/ or pdfs/inbox/ to the current paper
 - Press `p` to open the linked PDF
+- The review header shows the active extraction mode (`Extract: LLM` or `Extract: GROBID`)
 
 ### 8. Update Citation Counts (Optional)
 
@@ -190,11 +239,20 @@ snowball update-citations my-slr-project
 # Update only included papers
 snowball update-citations my-slr-project --status included
 
-# Custom delay between requests (default: 5 seconds)
-snowball update-citations my-slr-project --delay 3
+# Custom delay between requests (default: 15 seconds)
+snowball update-citations my-slr-project --delay 30
+
+# Optional explicit proxy configuration
+snowball update-citations my-slr-project --scholar-proxy http://user:pass@host:port
+
+# Optional free rotating proxies via scholarly/free-proxy
+snowball update-citations my-slr-project --scholar-free-proxy
 ```
 
-**Note:** This uses Google Scholar scraping via the `scholarly` library. Use responsibly with appropriate delays to avoid being rate-limited.
+**Note:** Google Scholar access uses scraping via the `scholarly` library. Scholar
+access is deliberately slow and opt-in for snowballing; prefer Semantic Scholar,
+OpenAlex, and OpenCitations where possible. Use proxies only where appropriate
+for your network and institutional policies.
 
 ### 9. Non-Interactive Commands (Scripting/AI Agents)
 
@@ -240,6 +298,7 @@ Add these to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 ```bash
 export SEMANTIC_SCHOLAR_API_KEY="your-api-key-here"
 export SNOWBALL_EMAIL="your.email@domain.com"
+export OPENAI_API_KEY="sk-..."  # Required for default LLM PDF extraction and LLM scoring
 ```
 
 Then commands will automatically use these credentials:
@@ -256,9 +315,17 @@ snowball snowball my-project --s2-api-key YOUR_KEY --email your@email.com
 
 CLI flags override environment variables when both are set.
 
+### LLM PDF Extraction
+
+PDF reference extraction defaults to `--extract llm`. This uses `pdftotext`
+plus an OpenAI-compatible chat API call, so you need:
+
+- `pdftotext` available on your path
+- `OPENAI_API_KEY` set in your environment
+
 ### GROBID (Optional)
 
-For best PDF parsing results, install GROBID:
+To use GROBID instead of LLM extraction, install and run GROBID:
 
 ```bash
 # Using Docker
@@ -267,7 +334,7 @@ docker run -p 8070:8070 lfoppiano/grobid:0.8.0
 # Or install manually following https://grobid.readthedocs.io/
 ```
 
-If GROBID is not available, Snowball will automatically fall back to Python-based PDF parsing.
+Then pass `--extract grobid` in CLI commands or select GROBID in the setup TUI.
 
 ### Filter Criteria
 
@@ -350,10 +417,11 @@ The public API includes:
 ### PDF Parsing Issues
 
 If PDF metadata extraction fails:
-1. Try with GROBID if not already using it
-2. Use DOI instead: `--doi` rather than `--pdf`
-3. Check PDF is not scanned/image-based
-4. Manually add metadata by editing the paper JSON file
+1. Check that `pdftotext` is installed and `OPENAI_API_KEY` is set
+2. Try GROBID extraction: `--extract grobid`
+3. Use DOI instead: `--doi` rather than `--pdf`
+4. Check PDF is not scanned/image-based
+5. Manually add metadata by editing the paper JSON file
 
 ### API Rate Limits
 
