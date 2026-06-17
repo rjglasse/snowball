@@ -3,7 +3,7 @@
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PaperStatus(str, Enum):
@@ -92,8 +92,7 @@ class Paper(BaseModel):
     # Raw data from APIs
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class FilterCriteria(BaseModel):
@@ -148,5 +147,4 @@ class ReviewProject(BaseModel):
     # Iteration-level statistics for accountability
     iteration_stats: Dict[int, IterationStats] = Field(default_factory=dict)
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
